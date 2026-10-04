@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use this software or benchmark in your research, please cite it as below."
+title: "Selective Escalation of Uncertain Streaming Sensor Anomalies via Tiered Decision Architectures"
+abstract: "Bounded Decision Tiering (BDT) is a stream processing architecture for real-time sensor telemetry anomaly detection using Apache Flink, Apache Kafka, in-JVM ONNX ensembles, and epistemic uncertainty gating. By selectively escalating ambiguous stream events (~20.5%) to an asynchronous XGBoost decision sidecar, detection F1-score is boosted from 0.4125 to 0.8238 (+99.7% gain) and false positive rates are slashed by 86.2% (from 7.20% down to 1.00%), while preserving sustained streaming throughput of 9,885 events/sec with only 0.7% system overhead."
+version: 1.0.0
+date-released: 2026-10-04
+license: Apache-2.0
+repository-code: "https://github.com/Ketamania/bdt"
+url: "https://github.com/Ketamania/bdt"
+keywords:
+  - "stream processing"
+  - "anomaly detection"
+  - "apache flink"
+  - "apache kafka"
+  - "epistemic uncertainty"
+  - "tiered inference"
+  - "xgboost"
+  - "onnx runtime"
+  - "iot sensor telemetry"
+  - "industrial iot"
+authors:
+  - name: "BDT Research Team"
+    website: "https://github.com/Ketamania/bdt"
+preferred-citation:
+  type: software
+  title: "Selective Escalation of Uncertain Streaming Sensor Anomalies via Tiered Decision Architectures"
+  authors:
+    - name: "BDT Research Team"
+  year: 2026
+  url: "https://github.com/Ketamania/bdt"
+  version: "1.0.0"
