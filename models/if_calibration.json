@@ -1,0 +1,16 @@
+{
+  "coef": 24.698744880345124,
+  "intercept": -0.895501717893586,
+  "features": [
+    "temperature",
+    "humidity",
+    "light",
+    "voltage",
+    "delta_temp_3m",
+    "delta_volt_3m",
+    "z_temp_15m",
+    "z_volt_15m",
+    "temp_slope_15m",
+    "var_temp_15m"
+  ]
+}
