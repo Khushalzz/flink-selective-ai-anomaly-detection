@@ -191,7 +191,9 @@ def run_sweep():
     plt.tight_layout()
     chart1_path = "experiments/results/f1_vs_throughput_tradeoff.png"
     plt.savefig(chart1_path, dpi=300)
-    plt.savefig("C:/Users/Ketamania/.gemini/antigravity/brain/d60fc223-b79e-46cc-b948-904cbcd1f449/f1_vs_throughput_tradeoff.png", dpi=300)
+    artifact_dir = "C:/Users/Ketamania/.gemini/antigravity/brain/d60fc223-b79e-46cc-b948-904cbcd1f449"
+    if os.path.isdir(artifact_dir):
+        plt.savefig(os.path.join(artifact_dir, "f1_vs_throughput_tradeoff.png"), dpi=300)
     print(f"Saved frontier chart to: {chart1_path}")
     
     # -------------------------------------------------------------
@@ -230,7 +232,8 @@ def run_sweep():
     plt.tight_layout()
     chart2_path = "experiments/results/latency_distribution_by_system.png"
     plt.savefig(chart2_path, dpi=300)
-    plt.savefig("C:/Users/Ketamania/.gemini/antigravity/brain/d60fc223-b79e-46cc-b948-904cbcd1f449/latency_distribution_by_system.png", dpi=300)
+    if os.path.isdir(artifact_dir):
+        plt.savefig(os.path.join(artifact_dir, "latency_distribution_by_system.png"), dpi=300)
     print(f"Saved latency chart to: {chart2_path}")
 
 if __name__ == "__main__":

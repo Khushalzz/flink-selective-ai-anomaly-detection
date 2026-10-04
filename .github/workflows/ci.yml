@@ -1,0 +1,67 @@
+name: BDT Streaming Pipeline CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  python-tests:
+    name: Python Tests & Leakage Verification
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11"]
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest flake8
+        pip install -r requirements.txt
+
+    - name: Lint with flake8
+      run: |
+        # stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=scratch,venv,.venv,archive*
+        # exit-zero treats all errors as warnings
+        flake8 . --count --exit-zero --max-complexity=15 --max-line-length=127 --statistics --exclude=scratch,venv,.venv,archive*
+
+    - name: Run Zero-Leakage Audit
+      run: |
+        python experiments/verify_no_leakage.py
+
+    - name: Run Pytest Suite
+      run: |
+        pytest tests/ -v
+
+  java-flink-build:
+    name: Java Flink Build & Shaded JAR
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: maven
+
+    - name: Build with Maven
+      run: |
+        cd flink-job
+        mvn clean package -DskipTests
+        ls -la target/

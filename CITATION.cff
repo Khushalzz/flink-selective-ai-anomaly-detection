@@ -5,8 +5,8 @@ abstract: "Bounded Decision Tiering (BDT) is a stream processing architecture fo
 version: 1.0.0
 date-released: 2026-10-04
 license: Apache-2.0
-repository-code: "https://github.com/Ketamania/bdt"
-url: "https://github.com/Ketamania/bdt"
+repository-code: "https://github.com/Khushalzz/flink-selective-ai-anomaly-detection"
+url: "https://github.com/Khushalzz/flink-selective-ai-anomaly-detection"
 keywords:
   - "stream processing"
   - "anomaly detection"
@@ -19,13 +19,13 @@ keywords:
   - "iot sensor telemetry"
   - "industrial iot"
 authors:
-  - name: "BDT Research Team"
-    website: "https://github.com/Ketamania/bdt"
+  - name: "Khushalzz"
+    website: "https://github.com/Khushalzz"
 preferred-citation:
   type: software
   title: "Selective Escalation of Uncertain Streaming Sensor Anomalies via Tiered Decision Architectures"
   authors:
-    - name: "BDT Research Team"
+    - name: "Khushalzz"
   year: 2026
-  url: "https://github.com/Ketamania/bdt"
+  url: "https://github.com/Khushalzz/flink-selective-ai-anomaly-detection"
   version: "1.0.0"

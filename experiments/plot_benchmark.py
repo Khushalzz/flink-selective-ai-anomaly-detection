@@ -130,10 +130,12 @@ def main():
     plt.savefig(chart_path, dpi=300)
     print(f"Saved 6-system comparison figure to: {chart_path}")
     
-    # Copy to brain artifact directory as well
-    artifact_chart_path = "C:/Users/Ketamania/.gemini/antigravity/brain/d60fc223-b79e-46cc-b948-904cbcd1f449/rigorous_6_system_comparison.png"
-    plt.savefig(artifact_chart_path, dpi=300)
-    print(f"Saved artifact chart to: {artifact_chart_path}")
+    # Copy to brain artifact directory if present
+    artifact_dir = "C:/Users/Ketamania/.gemini/antigravity/brain/d60fc223-b79e-46cc-b948-904cbcd1f449"
+    if os.path.isdir(artifact_dir):
+        artifact_chart_path = os.path.join(artifact_dir, "rigorous_6_system_comparison.png")
+        plt.savefig(artifact_chart_path, dpi=300)
+        print(f"Saved artifact chart to: {artifact_chart_path}")
 
 if __name__ == "__main__":
     main()
