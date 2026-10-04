@@ -30,7 +30,7 @@ demo:
 	$(PYTHON) demo_streaming_pipeline.py --samples 5000
 
 benchmark:
-	$(PYTHON) experiments/compile_master_results.py
+	$(PYTHON) experiments/evaluate_systems.py
 	$(PYTHON) experiments/plot_benchmark.py
 
 sweep:

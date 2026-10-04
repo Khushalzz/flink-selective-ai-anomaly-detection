@@ -2,7 +2,6 @@ package bdt;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.flink.api.common.functions.OpenContext;
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
 import redis.clients.jedis.Jedis;
 
@@ -20,38 +19,42 @@ public class RedisAlertSink extends RichSinkFunction<AnomalyRecord> {
     }
 
     @Override
-    public void open(OpenContext openContext) {
-        init();
+    public void open(OpenContext openContext) throws Exception {
+        connect();
     }
 
-    private void init() {
-        try {
-            jedis = new Jedis(host, port);
-            objectMapper = new ObjectMapper();
-        } catch (Exception e) {
-            System.err.println("Warning: Redis connection failed in worker: " + e.getMessage());
-        }
+    private void connect() throws Exception {
+        Jedis connection = new Jedis(host, port);
+        connection.ping();
+        jedis = connection;
+        objectMapper = new ObjectMapper();
     }
 
     @Override
-    public void invoke(AnomalyRecord record, Context context) {
-        // Only publish when an anomaly is flagged!
-        if (record.getIsAnomaly() == 1) {
-            try {
-                if (jedis == null) {
-                    init();
-                }
-                String alertJson = objectMapper.writeValueAsString(record);
-                jedis.rpush("alerts:anomalies", alertJson);
-                jedis.ltrim("alerts:anomalies", -2000, -1); // Keep last 2,000 alerts
-                jedis.publish("channel:anomalies", alertJson);
-            } catch (Exception e) {
-                // Reconnect on transient error
-                try {
-                    if (jedis != null) jedis.close();
-                } catch (Exception ignored) {}
-                jedis = null;
+    public void invoke(AnomalyRecord record, Context context) throws Exception {
+        if (record.getIsAnomaly() != 1) {
+            return;
+        }
+
+        try {
+            if (jedis == null) {
+                connect();
             }
+            String alertJson = objectMapper.writeValueAsString(record);
+            jedis.rpush("alerts:anomalies", alertJson);
+            jedis.ltrim("alerts:anomalies", -2000, -1);
+            jedis.publish("channel:anomalies", alertJson);
+        } catch (Exception e) {
+            if (jedis != null) {
+                try {
+                    jedis.close();
+                } catch (Exception ignored) {
+                    // Preserve the original Redis failure.
+                }
+            }
+            jedis = null;
+            objectMapper = null;
+            throw e;
         }
     }
 
@@ -60,7 +63,9 @@ public class RedisAlertSink extends RichSinkFunction<AnomalyRecord> {
         if (jedis != null) {
             try {
                 jedis.close();
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                // Best-effort client cleanup.
+            }
         }
     }
 }

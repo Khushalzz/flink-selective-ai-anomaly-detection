@@ -189,12 +189,12 @@ def main():
     
     # Compile Master Comparison Table
     systems_data = [
-        {"System": "A: Isolation Forest (IF)", **evaluate_metrics(y_test, pred_if, p_if), **evaluate_by_family(test_df, "pred_a", None), "Escalation %": "0.0%", "Latency": f"{lat_if_us:.1f} µs"},
-        {"System": "B: Autoencoder (AE)", **evaluate_metrics(y_test, pred_ae, p_ae), **evaluate_by_family(test_df, "pred_b", None), "Escalation %": "0.0%", "Latency": f"{lat_ae_us:.1f} µs"},
-        {"System": "C: IF + AE Ensemble", **evaluate_metrics(y_test, pred_c, p_c), **evaluate_by_family(test_df, "pred_c", None), "Escalation %": "0.0%", "Latency": f"{lat_c_us:.1f} µs"},
-        {"System": "D: IF + AE -> XGBoost", **evaluate_metrics(y_test, pred_d, p_d), **evaluate_by_family(test_df, "pred_d", None), "Escalation %": f"{escalation_pct:.1f}%", "Latency": f"{lat_d_us:.1f} µs"},
-        {"System": "E: IF + AE -> Heuristic", **evaluate_metrics(y_test, pred_e, p_e), **evaluate_by_family(test_df, "pred_e", None), "Escalation %": f"{escalation_pct:.1f}%", "Latency": f"{lat_e_us:.1f} µs"},
-        {"System": "F: IF + AE -> Real Laya", **evaluate_metrics(y_test, pred_f, p_f), **evaluate_by_family(test_df, "pred_f", None), "Escalation %": f"{escalation_pct:.1f}%", "Latency": f"{lat_f_us/1000.0:.2f} ms"},
+        {"System": "A: Isolation Forest (IF)", **evaluate_metrics(y_test, pred_if, p_if), **evaluate_by_family(test_df, "pred_a", None), "Escalation %": "0.0%", "Batch-average model time": f"{lat_if_us:.1f} µs/sample"},
+        {"System": "B: Autoencoder (AE)", **evaluate_metrics(y_test, pred_ae, p_ae), **evaluate_by_family(test_df, "pred_b", None), "Escalation %": "0.0%", "Batch-average model time": f"{lat_ae_us:.1f} µs/sample"},
+        {"System": "C: IF + AE Ensemble", **evaluate_metrics(y_test, pred_c, p_c), **evaluate_by_family(test_df, "pred_c", None), "Escalation %": "0.0%", "Batch-average model time": f"{lat_c_us:.1f} µs/sample"},
+        {"System": "D: IF + AE -> XGBoost", **evaluate_metrics(y_test, pred_d, p_d), **evaluate_by_family(test_df, "pred_d", None), "Escalation %": f"{escalation_pct:.1f}%", "Batch-average model time": f"{lat_d_us:.1f} µs/sample"},
+        {"System": "E: IF + AE -> Heuristic", **evaluate_metrics(y_test, pred_e, p_e), **evaluate_by_family(test_df, "pred_e", None), "Escalation %": f"{escalation_pct:.1f}%", "Batch-average model time": f"{lat_e_us:.1f} µs/sample"},
+        {"System": "F: IF + AE -> Real Laya", **evaluate_metrics(y_test, pred_f, p_f), **evaluate_by_family(test_df, "pred_f", None), "Escalation %": f"{escalation_pct:.1f}%", "Batch-average model time": f"{lat_f_us/1000.0:.2f} ms/sample"},
     ]
     
     res_df = pd.DataFrame(systems_data)

@@ -1,12 +1,12 @@
 """
 Standalone Interactive Streaming Anomaly Detection Simulation
-Demonstrates the full BDT (Bounded Decision Tiering) pipeline in pure Python
-without requiring external Docker containers.
+Runs a local Python replay over precomputed feature rows. It uses Python ONNX
+Runtime and XGBoost; it does not launch Flink, recompute online features, or call
+the FastAPI sidecar.
 
-Architecture emulated:
-  Stream Replay -> Welford Online Stats -> Fast Path ONNX (IF + AE)
-                -> Uncertainty Gating -> Tier 2 XGBoost Fallback
-                -> Live Metrics Dashboard
+Path exercised:
+  Held-out Parquet rows -> Python ONNX inference -> uncertainty gate
+                       -> local XGBoost fallback -> CLI metrics
 
 Usage:
   python demo_streaming_pipeline.py --samples 5000 --speed 2000
@@ -102,7 +102,7 @@ def main():
         if anom_type in family_counts:
             family_counts[anom_type] += 1
             
-        # 1. Tier 1: Fast Path In-JVM ONNX Inference
+        # 1. Python ONNX Runtime fast path (not the Flink/JVM runtime)
         outs_if = sess_if.run(None, {if_in_name: feat})
         raw_if = outs_if[1][0, 0] if len(outs_if) > 1 and hasattr(outs_if[1], 'shape') else outs_if[0][0]
         p_if = float(sigmoid(if_calib["coef"] * (-raw_if) + if_calib["intercept"]))
@@ -188,7 +188,7 @@ def main():
     print(f"Recall (Sensitivity)          : {overall_r:.4f}  (Anomalies Caught: {tp}/{tp+fn})")
     print(f"False Positive Rate (FPR)     : {fpr:.2f}% (False Alarms: {fp:,} out of {tn+fp:,} normal windows)")
     print("-" * 85)
-    print("Decision Latency Profile (End-to-End Inference):")
+    print("Python Model Inference Timing (local loop; excludes Flink/network/sinks):")
     print(f"  p50 (Median)                : {np.percentile(latencies_us, 50):.2f} µs")
     print(f"  p95                         : {np.percentile(latencies_us, 95):.2f} µs")
     print(f"  p99                         : {np.percentile(latencies_us, 99):.2f} µs")

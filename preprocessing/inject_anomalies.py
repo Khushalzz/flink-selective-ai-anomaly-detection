@@ -1,3 +1,4 @@
+import argparse
 import os
 import numpy as np
 import pandas as pd
@@ -47,7 +48,7 @@ def inject_controlled_anomalies(df: pd.DataFrame, target_prevalence: float = 0.0
     2. Contextual Drift (1.0%): gradual degradation / slope shift over 30 mins
     3. Flatlines / Dropout (0.8%): stuck sensor values
     """
-    np.random.seed(seed)
+    rng = np.random.RandomState(seed)
     df = df.copy()
     n = len(df)
     df["label"] = 0
@@ -55,17 +56,17 @@ def inject_controlled_anomalies(df: pd.DataFrame, target_prevalence: float = 0.0
     
     # 1. Point Spikes (approx 1.2% of data)
     n_spikes = int(n * 0.012)
-    spike_idx = np.random.choice(n, size=n_spikes, replace=False)
+    spike_idx = rng.choice(n, size=n_spikes, replace=False)
     for idx in spike_idx:
         # Either temp spike or voltage drop
-        if np.random.rand() > 0.5:
+        if rng.rand() > 0.5:
             # Temperature spike
-            shock = np.random.uniform(8.0, 20.0) * (1 if np.random.rand() > 0.3 else -1)
+            shock = rng.uniform(8.0, 20.0) * (1 if rng.rand() > 0.3 else -1)
             df.iloc[idx, df.columns.get_loc("temperature")] += shock
             df.iloc[idx, df.columns.get_loc("anomaly_type")] = "SPIKE_TEMP"
         else:
             # Voltage drop
-            drop = np.random.uniform(0.4, 0.9)
+            drop = rng.uniform(0.4, 0.9)
             df.iloc[idx, df.columns.get_loc("voltage")] = max(1.8, df.iloc[idx]["voltage"] - drop)
             df.iloc[idx, df.columns.get_loc("anomaly_type")] = "SPIKE_VOLT_DROP"
         df.iloc[idx, df.columns.get_loc("label")] = 1
@@ -73,9 +74,9 @@ def inject_controlled_anomalies(df: pd.DataFrame, target_prevalence: float = 0.0
     # 2. Contextual Drift (approx 1.0% of data in blocks of 30-50 readings)
     n_drift_blocks = int((n * 0.010) / 40)
     for _ in range(n_drift_blocks):
-        start = np.random.randint(100, n - 60)
-        length = np.random.randint(25, 45)
-        drift_slope = np.random.uniform(0.2, 0.5)
+        start = rng.randint(100, n - 60)
+        length = rng.randint(25, 45)
+        drift_slope = rng.uniform(0.2, 0.5)
         for step in range(length):
             cur = start + step
             df.iloc[cur, df.columns.get_loc("temperature")] += (step * drift_slope)
@@ -85,8 +86,8 @@ def inject_controlled_anomalies(df: pd.DataFrame, target_prevalence: float = 0.0
     # 3. Flatline / Stuck Sensor (approx 0.8% of data in blocks of 20-30 readings)
     n_flat_blocks = int((n * 0.008) / 25)
     for _ in range(n_flat_blocks):
-        start = np.random.randint(100, n - 40)
-        length = np.random.randint(15, 30)
+        start = rng.randint(100, n - 40)
+        length = rng.randint(15, 30)
         stuck_temp = df.iloc[start]["temperature"]
         stuck_volt = df.iloc[start]["voltage"]
         for step in range(length):
@@ -102,6 +103,11 @@ def inject_controlled_anomalies(df: pd.DataFrame, target_prevalence: float = 0.0
     return df
 
 def main():
+    parser = argparse.ArgumentParser(description="Build chronological feature splits with controlled anomalies.")
+    parser.add_argument("--validation-seed", type=int, default=42)
+    parser.add_argument("--test-seed", type=int, default=42)
+    args = parser.parse_args()
+
     os.makedirs("data/processed", exist_ok=True)
     parquet_path = "data_chronological.parquet"
     if not os.path.exists(parquet_path):
@@ -129,11 +135,13 @@ def main():
 
     # Validation and Test sets get controlled anomaly injection
     print("\n--- Injecting anomalies into Validation Set ---")
-    val_injected = inject_controlled_anomalies(val_raw)
+    print(f"Using validation anomaly seed: {args.validation_seed}")
+    val_injected = inject_controlled_anomalies(val_raw, seed=args.validation_seed)
     val_feat = compute_dual_window_features(val_injected)
 
     print("\n--- Injecting anomalies into Test Set ---")
-    test_injected = inject_controlled_anomalies(test_raw)
+    print(f"Using test anomaly seed: {args.test_seed}")
+    test_injected = inject_controlled_anomalies(test_raw, seed=args.test_seed)
     test_feat = compute_dual_window_features(test_injected)
 
     train_feat.to_parquet("data/processed/train_features.parquet", index=False)

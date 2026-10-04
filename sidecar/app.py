@@ -1,18 +1,20 @@
 import os
-import time
-import json
-import numpy as np
-import xgboost as xgb
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import List, Optional
 
-# Enforce strict thread bounds: 4 threads max for CPU sidecar
+# Set limits before importing numerical libraries that read these variables at import time.
 os.environ["OMP_NUM_THREADS"] = "4"
 os.environ["OPENBLAS_NUM_THREADS"] = "4"
 os.environ["MKL_NUM_THREADS"] = "4"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "4"
 os.environ["NUMEXPR_NUM_THREADS"] = "4"
+
+import json
+import time
+from typing import List, Literal
+
+import numpy as np
+import xgboost as xgb
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
 
 from sidecar.laya_runner import get_laya_agent, format_sensor_state, predict_laya_batch
 
@@ -31,8 +33,8 @@ class SensorState(BaseModel):
     z_volt_15m: float
     temp_slope_15m: float
     var_temp_15m: float
-    p_if: float
-    p_ae: float
+    p_if: float = Field(ge=0.0, le=1.0)
+    p_ae: float = Field(ge=0.0, le=1.0)
 
 class DecisionResponse(BaseModel):
     decision: str        # "NORMAL" or "ANOMALY"
@@ -41,14 +43,16 @@ class DecisionResponse(BaseModel):
     engine: str
 
 class BatchSensorState(BaseModel):
-    items: List[SensorState]
+    items: List[SensorState] = Field(min_length=1, max_length=256)
 
 # Global Model Registry
 xgb_model = None
+laya_ready = False
 
 @app.on_event("startup")
 def load_models():
-    global xgb_model
+    global xgb_model, laya_ready
+    laya_ready = False
     xgb_path = os.path.join("models", "xgboost_fallback.json")
     if os.path.exists(xgb_path):
         xgb_model = xgb.XGBClassifier()
@@ -60,13 +64,14 @@ def load_models():
     # Warm up Laya
     try:
         _ = get_laya_agent()
+        laya_ready = True
         print("[Sidecar] Laya agent initialized.")
     except Exception as e:
         print(f"[Sidecar] Warning: Laya initialization failed: {e}")
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "xgb_ready": xgb_model is not None, "laya_ready": True}
+    return {"status": "ok", "xgb_ready": xgb_model is not None, "laya_ready": laya_ready}
 
 def to_feature_vector(s: SensorState) -> np.ndarray:
     return np.array([
@@ -126,6 +131,8 @@ def decide_heuristic(state: SensorState):
 @app.post("/decide/laya", response_model=DecisionResponse)
 def decide_laya(state: SensorState):
     """System F: Real Laya / Jev Non-Autoregressive Decision Engine"""
+    if not laya_ready:
+        raise HTTPException(status_code=503, detail="Laya model is not ready")
     t0 = time.perf_counter()
     st_text = format_sensor_state(
         moteid=state.moteid, epoch=state.epoch,
@@ -147,11 +154,13 @@ def decide_laya(state: SensorState):
     )
 
 @app.post("/decide/batch")
-def decide_batch(batch: BatchSensorState, engine: str = "xgb"):
+def decide_batch(batch: BatchSensorState, engine: Literal["xgb", "heuristic", "laya"] = "xgb"):
     t0 = time.perf_counter()
     results = []
     
-    if engine == "xgb" and xgb_model is not None:
+    if engine == "xgb":
+        if xgb_model is None:
+            raise HTTPException(status_code=503, detail="XGBoost model not loaded")
         X = np.vstack([to_feature_vector(s) for s in batch.items])
         probs = xgb_model.predict_proba(X)
         for i, s in enumerate(batch.items):
@@ -163,6 +172,8 @@ def decide_batch(batch: BatchSensorState, engine: str = "xgb"):
                 "p_anomaly": p_anom
             })
     elif engine == "laya":
+        if not laya_ready:
+            raise HTTPException(status_code=503, detail="Laya model is not ready")
         state_texts = [
             format_sensor_state(
                 moteid=s.moteid, epoch=s.epoch,

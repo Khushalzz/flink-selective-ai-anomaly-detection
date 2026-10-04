@@ -17,14 +17,18 @@ def main():
     # Set aesthetics
     plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    
+    system_f_name = str(df["System"].iloc[5]).lower()
+    system_f_is_legacy = "legacy" in system_f_name and "proxy" in system_f_name
+    if system_f_is_legacy:
+        fig.suptitle("Offline test-split results; F is an unverified legacy proxy", fontsize=14)
+    system_f_label = "F: legacy proxy" if system_f_is_legacy else "F: +Laya"
     system_labels = [
         "A: IF",
         "B: AE",
         "C: IF+AE",
         "D: +XGBoost",
         "E: +Heuristic",
-        "F: +Real Laya"
+        system_f_label,
     ]
     colors = ["#4C72B0", "#55A868", "#C44E52", "#8172B2", "#E377C2", "#17BECF"]
     x = np.arange(len(system_labels))
@@ -126,16 +130,12 @@ def main():
         ax4.text(i + w4, flatlines[i] + 1.5, f"{flatlines[i]:.0f}%", ha='center', fontsize=7.5)
         
     plt.tight_layout()
-    chart_path = "experiments/results/rigorous_6_system_comparison.png"
-    plt.savefig(chart_path, dpi=300)
-    print(f"Saved 6-system comparison figure to: {chart_path}")
-    
-    # Copy to brain artifact directory if present
-    artifact_dir = "C:/Users/Ketamania/.gemini/antigravity/brain/d60fc223-b79e-46cc-b948-904cbcd1f449"
-    if os.path.isdir(artifact_dir):
-        artifact_chart_path = os.path.join(artifact_dir, "rigorous_6_system_comparison.png")
-        plt.savefig(artifact_chart_path, dpi=300)
-        print(f"Saved artifact chart to: {artifact_chart_path}")
+    result_chart = "experiments/results/rigorous_6_system_comparison.png"
+    asset_chart = "assets/rigorous_6_system_comparison.png"
+    os.makedirs("assets", exist_ok=True)
+    fig.savefig(result_chart, dpi=300)
+    fig.savefig(asset_chart, dpi=300)
+    print(f"Saved offline comparison figures to {result_chart} and {asset_chart}")
 
 if __name__ == "__main__":
     main()

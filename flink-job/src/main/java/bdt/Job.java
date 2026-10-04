@@ -4,6 +4,7 @@ import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
+import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 
@@ -22,8 +23,14 @@ public class Job {
         int redisPort = Integer.parseInt(config.getOrDefault("redisPort", "6379"));
         String clickhouseUrl = config.getOrDefault("clickhouseUrl", "http://clickhouse:8123");
         int parallelism = Integer.parseInt(config.getOrDefault("parallelism", "4"));
+        long checkpointIntervalMs = Long.parseLong(config.getOrDefault("checkpointIntervalMs", "10000"));
+        if (checkpointIntervalMs <= 0) {
+            throw new IllegalArgumentException("checkpointIntervalMs must be greater than zero");
+        }
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.enableCheckpointing(checkpointIntervalMs, CheckpointingMode.AT_LEAST_ONCE);
+        env.getCheckpointConfig().setCheckpointTimeout(Math.max(60_000L, checkpointIntervalMs * 6));
         env.setParallelism(parallelism);
         env.setRestartStrategy(RestartStrategies.fixedDelayRestart(5, Duration.ofSeconds(2)));
 
@@ -49,7 +56,7 @@ public class Job {
                 .name("AnomalyDetector")
                 .setParallelism(parallelism);
 
-        // Sink 1: ClickHouse (Asynchronous micro-batched sink for analytics)
+        // Sink 1: ClickHouse (acknowledged micro-batches; backpressure on insert failure)
         processedStream.addSink(new ClickHouseSink(clickhouseUrl))
                 .name("ClickHouseSink")
                 .setParallelism(parallelism);

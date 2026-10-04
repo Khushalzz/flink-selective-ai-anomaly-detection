@@ -1,93 +1,25 @@
-# BDT System Architecture Deep-Dive
+# Current System Architecture
 
-## 1. High-Level Architectural Principles
+This document describes what the checked-in code runs today. The repository has an offline model-evaluation path and a separate Java Flink example; they are not wired together as a deployed BDT pipeline.
 
-Bounded Decision Tiering (BDT) is an industrial IoT streaming architecture designed to resolve the fundamental trade-off between **sub-millisecond streaming throughput** and **expressive anomaly classification accuracy**.
+## Flink runtime
 
-```mermaid
-flowchart TD
-    subgraph INGEST["1. Telemetry Ingestion"]
-        P["PyArrow Producer<br/>(LZ4 compressed)"] -->|Kafka KRaft Protocol| K["Topic: intel-lab-sensors<br/>4 Partitions"]
-    end
+`flink-job/src/main/java/bdt/Job.java` reads JSON records from Kafka, keys them by mote ID, and runs `AnomalyDetectorFunction`. That function applies fixed physical bounds and Z-score checks against a per-key Welford accumulator. The accumulator is lifetime state; it is not a 15-minute rolling window. The current job does not invoke the ONNX models or the FastAPI sidecar.
 
-    subgraph FLINK["2. Apache Flink Streaming Engine (Parallelism = 4-6)"]
-        K -->|KeyBy moteid| KPF["KeyedProcessFunction<br/>(Stateful Welford Accumulator)"]
-        KPF -->|10D Feature Vector| ONNX["In-JVM ONNX Runtime (C++ JNI)"]
-        
-        subgraph MODELS["Tier 1: In-JVM Detectors (< 1.5 µs)"]
-            ONNX --> IF["Isolation Forest ONNX<br/>Path Depth -> Calibrated P(IF)"]
-            ONNX --> AE["PyTorch Autoencoder ONNX<br/>Reconstruction MSE -> Calibrated P(AE)"]
-        end
-        
-        IF & AE --> GATE{"Epistemic Uncertainty Gate<br/>• Margin: 0.35 < P < 0.65<br/>• Disagreement: sgn(P_IF - 0.5) != sgn(P_AE - 0.5)"}
-    end
+The job enables Flink checkpoints in at-least-once mode. Kafka offsets and keyed state can be restored from a checkpoint. Compose stores checkpoint files in the named local `flink_checkpoints` volume. ClickHouse and Redis are not transactional Flink sinks, so recovery may replay records and create duplicates. Downstream consumers should use `(moteid, epoch)` as an event identity where deduplication is needed.
 
-    subgraph SIDECAR["3. Tier 2 Decision Fallback (Asynchronous Python Sidecar)"]
-        GATE -->|Confident 79.5%| FAST["Fast-Path Emission<br/>(1.5 µs latency)"]
-        GATE -->|Uncertain 20.5%| HTTP["Non-Blocking Async HTTP/gRPC"]
-        
-        subgraph ENGINES["Fallback Engines (Budgeted 4 CPU Threads)"]
-            HTTP --> XGB["XGBoost 12D Classifier<br/>(Latency: 1.2 µs, F1: 0.824)"]
-            HTTP -.-> LAYA["ModernBERT-Large (Laya)<br/>(Latency: 833.3 ms, Collapse!)"]
-        end
-    end
+ClickHouse inserts are batched and acknowledged synchronously. A non-success HTTP response fails the sink task so Flink can restart from a checkpoint. The ClickHouse table schema is initialized for new ClickHouse data directories from `docker/clickhouse/init.sql`. Redis write failures are surfaced to Flink rather than silently discarded.
 
-    subgraph SINKS["4. Multi-Sink Persistence Tier"]
-        FAST & XGB --> CH["ClickHouse Sink<br/>(Batched Columnar Storage)"]
-        FAST & XGB --> RD["Redis Sink<br/>(Instant FIFO Alert Queue)"]
-        FAST & XGB --> STDOUT["Sampled Alert Logger"]
-    end
-```
+## Offline Python evaluation
 
----
+`experiments/evaluate_systems.py` loads precomputed feature rows and evaluates Python ONNX Runtime, XGBoost, and Laya models. `demo_streaming_pipeline.py` replays those rows locally, but does not recompute streaming features or communicate with Kafka/Flink/sidecar.
 
-## 2. Ingestion Tier: Zero-Copy Partitioned Streaming
+`experiments/streaming_benchmark_sweep.py` computes offline detection scores at selected escalation rates. Its capacity column is an analytical model-service estimate based on batched Python timings and an assumed transport cap; it excludes Flink, Kafka, HTTP, and sink work. It does not include Laya or measured latency percentiles. The estimate is not end-to-end streaming performance.
 
-- **Data Source:** 54 Mica2Dot sensor motes deployed across the Intel Berkeley Research Lab, recording ambient temperature, relative humidity, light level, and battery voltage.
-- **Serialization:** Zero-copy PyArrow record batches encoded into compact binary JSON via C `orjson` and compressed with LZ4.
-- **Kafka Topology:** 4 topic partitions keyed uniformly by `moteid`. This guarantees that all telemetry from a specific physical sensor arrives strictly in order at the same Flink TaskManager slot.
+## FastAPI sidecar
 
----
+`sidecar/app.py` exposes XGBoost, heuristic, Laya, and batch endpoints. The health response reports model readiness. Batch calls are limited to 256 records, and the engine name is validated. The Flink job currently does not call these endpoints.
 
-## 3. Streaming Engine: Apache Flink Stateful Processing
+## Local services
 
-### Stateful KeyedProcessFunction
-Traditional tumbling or sliding windows introduce artificial latency barriers: an anomaly occurring at second 1 of a 5-minute window is not detected until the window closes at second 300.
-
-BDT employs a continuous, non-windowed `KeyedProcessFunction<Integer, SensorReading, AnomalyRecord>`. Each physical sensor maintains private state in Flink's managed `ValueState<SensorStats>`:
-- **Online Welford Accumulator:** Continuously updates rolling mean and $M_2$ variance in $O(1)$ time and $O(1)$ memory without storing historical tuples.
-- **Short-Term Shock Tracking:** Maintains the 3-minute prior state to compute instantaneous gradient shocks:
-  $$\Delta T_{3m} = T_t - T_{t-3m}, \quad \Delta V_{3m} = V_t - V_{t-3m}$$
-- **Medium-Term Baseline Statistics:** Computes standardized Z-scores over 15-minute horizons:
-  $$Z_{temp} = \frac{T_t - \mu_{temp}}{\sigma_{temp}}, \quad Z_{volt} = \frac{V_t - \mu_{volt}}{\sigma_{volt}}$$
-
-### In-JVM ONNX Embedded Inference
-To eliminate inter-process communication (IPC) serialization overhead on the critical path, Tier 1 fast-path models are embedded directly inside the Flink TaskManager JVM using the official Microsoft ONNX Runtime C++ JNI bridge:
-- **Zero Socket Latency:** In-process pointer passing reduces inference latency to $<1.5\ \mu\text{s}$ per tuple.
-- **Thread Safety:** The ONNX `InferenceSession` is initialized once per parallel TaskManager slot in `open(OpenContext)` and reused concurrently across tuples.
-
----
-
-## 4. Decision Fallback Tier: Python Sidecar Architecture
-
-- **Protocol:** FastAPI asynchronous HTTP/1.1 and gRPC interface running with `uvicorn`.
-- **CPU Concurrency Budgeting:** To avoid thread thrashing and prevent CPU starvation of Flink TaskManager worker threads, the sidecar is constrained to a strict 4-thread execution budget via environment variables:
-  ```bash
-  OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MKL_NUM_THREADS=4 uvicorn sidecar.app:app
-  ```
-- **Fallback Execution (System D vs. System F):**
-  - **System D (XGBoost):** GBDT scoring requires only $1.2\ \mu\text{s}$ per item on CPU. At 20% escalation, the auxiliary CPU load is under $0.25\%$ of one core.
-  - **System F (ModernBERT-large / Laya):** 395M transformer parameters on CPU require $833.3\ \text{ms}$ per item. At 20% escalation of a 10,000 ev/s stream, it creates a 1,666x overload factor, immediately exhausting buffer pools and triggering backpressure collapse.
-
----
-
-## 5. Multi-Sink Persistence Tier
-
-1. **ClickHouse Analytics Sink:**
-   - Buffers processed `AnomalyRecord` instances into 1,000-event micro-batches or flushes every 200 ms.
-   - Stored in a ClickHouse `MergeTree` partitioned by date and indexed by `(moteid, timestamp)`.
-2. **Redis Alert Queue:**
-   - When `is_anomaly == 1`, records are pushed to a Redis FIFO queue (`LPUSH alerts:intel-sensors`).
-   - Enables immediate actuation (triggering ventilation systems, cutting battery lines, or alerting site engineers).
-3. **MongoDB Audit Store:**
-   - Retains full calibration metadata, model checksums, and experimental audit trails.
+`docker-compose.yml` starts a single Kafka broker, Flink JobManager and TaskManager, Redis, ClickHouse, and MongoDB. Compose starts the infrastructure only; it does not build or submit the Flink job or start the Python sidecar. The MongoDB service is not currently used by the runtime code.

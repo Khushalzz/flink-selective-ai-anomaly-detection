@@ -89,7 +89,7 @@ def main():
     xgb_model.fit(X_train_xgb, y_train_xgb)
     
     y_pred_xgb = xgb_model.predict(X_train_xgb)
-    print("\nXGBoost Fallback Performance on Uncertain Subset:")
+    print("\nXGBoost fit on the uncertain validation subset (in-sample report; not a generalization metric):")
     print(classification_report(y_train_xgb, y_pred_xgb, target_names=["NORMAL", "ANOMALY"]))
     
     xgb_path = "models/xgboost_fallback.json"
