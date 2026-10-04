@@ -1,0 +1,101 @@
+# ==============================================================================
+# Git Ignore Rules for High-Throughput Streaming Anomaly Detection Engine
+# ==============================================================================
+
+# Raw Data, Archives & Large Ingestion Files
+archive (5)/
+archive (5).zip
+data_chronological.parquet
+*.zip
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# Java & Apache Flink Build Artifacts
+**/target/
+target/
+*.jar
+*.war
+*.nar
+*.ear
+*.class
+.mvn/
+
+# Python Bytecode, Caches & Packaging
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Testing & Linting Artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# OS-Specific Metadata
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# IDE & Editor Configurations
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# Runtime Logs, Dumps & Scratch Artifacts
+*.log
+*.tmp
+logs/
+scratch/
+temp_test.html
+reaction_bot.py
+calculate_h200.py
+signature*.jpg
+
+# ==============================================================================
+# Explicit Whitelist: Retain Essential Models, Processed Data & Results
+# ==============================================================================
+!models/*.onnx
+!models/*.onnx.data
+!models/*.json
+!data/processed/*.parquet
+!experiments/results/*
+!assets/*
