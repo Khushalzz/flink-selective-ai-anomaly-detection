@@ -33,6 +33,16 @@ This repository studies that question with Intel Lab telemetry, controlled anoma
 
 The paths are not yet connected end to end. See [the architecture notes](docs/ARCHITECTURE.md) for the exact implementation boundary.
 
+## Frontend preview
+
+A standalone responsive dashboard preview is available in `dashboard/`. It uses sample data and the Intel Lab floor-plan image; it does not connect to Kafka or Flink.
+
+```bash
+python -m http.server 4173 --bind 127.0.0.1
+```
+
+Open [http://localhost:4173/dashboard/](http://localhost:4173/dashboard/).
+
 ## Offline results
 
 The checked-in evaluation uses 40,000 chronological test windows with synthetic injected anomalies (2.85% prevalence). The scores are offline model results, not results from the Java Flink job.
