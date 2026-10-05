@@ -1,6 +1,6 @@
 # Mathematical Formulations & Theoretical Foundations
 
-This document provides the formal mathematical derivations, statistical calibration theorems, and queuing theory proofs underpinning the BDT (Bounded Decision Tiering) architecture.
+This document provides the formal mathematical derivations, statistical calibration theorems, and queuing theory proofs underpinning the Big Data Technologies (BDT) project.
 
 ---
 

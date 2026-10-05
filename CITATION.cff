@@ -1,7 +1,7 @@
 cff-version: 1.2.0
 message: "If you use this software or benchmark in your research, please cite it as below."
-title: "Selective Escalation of Uncertain Streaming Sensor Anomalies via Tiered Decision Architectures"
-abstract: "Bounded Decision Tiering (BDT) is a stream processing architecture for real-time sensor telemetry anomaly detection using Apache Flink, Apache Kafka, in-JVM ONNX ensembles, and epistemic uncertainty gating. By selectively escalating ambiguous stream events (~20.5%) to an asynchronous XGBoost decision sidecar, detection F1-score is boosted from 0.4125 to 0.8238 (+99.7% gain) and false positive rates are slashed by 86.2% (from 7.20% down to 1.00%), while preserving sustained streaming throughput of 9,885 events/sec with only 0.7% system overhead."
+title: "Big Data Technologies (BDT): Real-Time IoT Anomaly Detection with Apache Flink"
+abstract: "Big Data Technologies (BDT) is a course project demonstrating real-time IoT anomaly detection with Apache Kafka and Apache Flink. Isolation Forest, Autoencoder, and XGBoost ONNX models run in the Flink JVM, with results stored in ClickHouse and Redis and shown in a live dashboard. In one local 40,000-event replay, the fast Isolation Forest plus Autoencoder baseline achieved F1 0.4125 at 1,283 events per second; selective XGBoost escalation achieved F1 0.8238 at 1,332 events per second, escalating 20.51 percent of events. These are single-run, local measurements under burst input; the optional Laya comparison is experimental."
 version: 1.0.0
 date-released: 2026-10-04
 license: Apache-2.0
@@ -23,7 +23,7 @@ authors:
     website: "https://github.com/Khushalzz"
 preferred-citation:
   type: software
-  title: "Selective Escalation of Uncertain Streaming Sensor Anomalies via Tiered Decision Architectures"
+  title: "Big Data Technologies (BDT): Real-Time IoT Anomaly Detection with Apache Flink"
   authors:
     - name: "Khushalzz"
   year: 2026

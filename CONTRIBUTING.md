@@ -1,6 +1,6 @@
 # Contributing to BDT
 
-Thank you for your interest in contributing to **BDT (Bounded Decision Tiering)**!
+Thank you for your interest in contributing to **Big Data Technologies (BDT)**!
 
 ## Code of Conduct
 We are committed to providing a welcoming, inclusive, and harassment-free environment for all contributors.

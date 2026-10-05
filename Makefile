@@ -3,7 +3,7 @@
 PYTHON ?= python
 
 help:
-	@echo "BDT: Bounded Decision Tiering Streaming Pipeline"
+	@echo "Big Data Technologies (BDT): Streaming Anomaly Detection"
 	@echo "Available commands:"
 	@echo "  make install      - Install Python dependencies"
 	@echo "  make test         - Run pytest test suite"

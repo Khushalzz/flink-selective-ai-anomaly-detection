@@ -1,6 +1,6 @@
 <div align="center">
-  <h1>BDT · Bounded Decision Tiering</h1>
-  <p><strong>Selective escalation for streaming IoT anomaly detection</strong></p>
+  <h1>Big Data Technologies (BDT)</h1>
+  <p><strong>Real-time IoT anomaly detection with Apache Kafka and Flink</strong></p>
   <p>
     <a href="https://flink.apache.org/"><img src="https://img.shields.io/badge/Apache%20Flink-1.20.2-E6526F?logo=apacheflink&logoColor=white" alt="Apache Flink 1.20.2"></a>
     <a href="https://kafka.apache.org/"><img src="https://img.shields.io/badge/Apache%20Kafka-3.9.2-231F20?logo=apachekafka&logoColor=white" alt="Apache Kafka 3.9.2"></a>

@@ -46,7 +46,7 @@ def parse_args():
 def main():
     args = parse_args()
     print("=" * 85)
-    print("  🚀 BDT: BOUNDED DECISION TIERING STREAMING DEMONSTRATION")
+    print("  🚀 BIG DATA TECHNOLOGIES: STREAMING ANOMALY DEMONSTRATION")
     print("  Sub-millisecond IoT Anomaly Detection with Selective Epistemic Escalation")
     print("=" * 85)
     
