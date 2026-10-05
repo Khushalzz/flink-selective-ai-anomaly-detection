@@ -1,0 +1,6 @@
+kafka-python==2.2.15
+lz4==4.4.3
+orjson==3.10.18
+pandas==2.2.3
+pyarrow==19.0.1
+redis==5.2.1

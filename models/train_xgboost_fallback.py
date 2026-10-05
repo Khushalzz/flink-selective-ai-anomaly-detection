@@ -4,6 +4,8 @@ import numpy as np
 import pandas as pd
 import onnxruntime as ort
 import xgboost as xgb
+import onnxmltools
+from onnxmltools.convert.common.data_types import FloatTensorType
 from sklearn.metrics import classification_report, f1_score
 
 FEATURE_COLS = [
@@ -95,6 +97,16 @@ def main():
     xgb_path = "models/xgboost_fallback.json"
     xgb_model.save_model(xgb_path)
     print(f"Saved XGBoost fallback model to: {xgb_path} ({os.path.getsize(xgb_path)/1024:.1f} KB)")
+
+    # Export the exact 12-feature classifier for in-JVM ONNX Runtime inference.
+    xgb_onnx = onnxmltools.convert_xgboost(
+        xgb_model,
+        initial_types=[("float_input", FloatTensorType([None, len(FEATURE_COLS) + 2]))],
+        target_opset=15,
+    )
+    onnx_path = "models/xgboost_fallback.onnx"
+    onnxmltools.utils.save_model(xgb_onnx, onnx_path)
+    print(f"Exported XGBoost fallback to ONNX: {onnx_path} ({os.path.getsize(onnx_path)/1024:.1f} KB)")
 
 if __name__ == "__main__":
     main()

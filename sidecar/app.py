@@ -12,11 +12,13 @@ import time
 from typing import List, Literal
 
 import numpy as np
-import xgboost as xgb
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from sidecar.laya_runner import get_laya_agent, format_sensor_state, predict_laya_batch
+try:
+    import xgboost as xgb
+except ImportError:
+    xgb = None
 
 app = FastAPI(title="Streaming Anomaly Escalation Sidecar")
 
@@ -54,15 +56,18 @@ def load_models():
     global xgb_model, laya_ready
     laya_ready = False
     xgb_path = os.path.join("models", "xgboost_fallback.json")
-    if os.path.exists(xgb_path):
+    if xgb is not None and os.path.exists(xgb_path):
         xgb_model = xgb.XGBClassifier()
         xgb_model.load_model(xgb_path)
         print(f"[Sidecar] Loaded XGBoost fallback model from {xgb_path}")
     else:
         print("[Sidecar] Warning: models/xgboost_fallback.json not found!")
     
-    # Warm up Laya
+    if os.environ.get("ENABLE_LAYA_MODEL", "0").lower() not in ("1", "true", "yes"):
+        print("[Sidecar] Laya model is disabled; enable it only for the optional comparison profile.")
+        return
     try:
+        from sidecar.laya_runner import get_laya_agent
         _ = get_laya_agent()
         laya_ready = True
         print("[Sidecar] Laya agent initialized.")
@@ -134,6 +139,7 @@ def decide_laya(state: SensorState):
     if not laya_ready:
         raise HTTPException(status_code=503, detail="Laya model is not ready")
     t0 = time.perf_counter()
+    from sidecar.laya_runner import format_sensor_state, predict_laya_batch
     st_text = format_sensor_state(
         moteid=state.moteid, epoch=state.epoch,
         temp=state.temperature, volt=state.voltage, hum=state.humidity, light=state.light,
@@ -174,6 +180,7 @@ def decide_batch(batch: BatchSensorState, engine: Literal["xgb", "heuristic", "l
     elif engine == "laya":
         if not laya_ready:
             raise HTTPException(status_code=503, detail="Laya model is not ready")
+        from sidecar.laya_runner import format_sensor_state, predict_laya_batch
         state_texts = [
             format_sensor_state(
                 moteid=s.moteid, epoch=s.epoch,

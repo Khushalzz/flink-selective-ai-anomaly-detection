@@ -4,6 +4,7 @@
 
 # Core Machine Learning & Model Inference
 onnxruntime>=1.16.0
+onnxmltools>=1.16.0
 xgboost>=2.0.0
 torch>=2.1.0
 laya>=0.3.0

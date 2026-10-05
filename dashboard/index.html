@@ -26,19 +26,19 @@
       <nav class="nav-list">
         <a class="nav-item active" href="#overview"><span class="nav-icon">◫</span> Overview <span class="nav-dot"></span></a>
         <a class="nav-item" href="#sensor-map"><span class="nav-icon">⌖</span> Sensor map <span class="nav-count">54</span></a>
-        <a class="nav-item" href="#event-queue"><span class="nav-icon">▤</span> Event queue <span class="nav-count alert-count">8</span></a>
+        <a class="nav-item" href="#event-queue"><span class="nav-icon">▤</span> Event queue <span class="nav-count alert-count" id="event-count">0</span></a>
         <a class="nav-item" href="#model-routing"><span class="nav-icon">⌘</span> Model routing</a>
       </nav>
 
       <p class="nav-label nav-label-spaced">PROJECT</p>
       <nav class="nav-list">
-        <a class="nav-item" href="../README.md"><span class="nav-icon">↗</span> Project README</a>
-        <a class="nav-item" href="../docs/ARCHITECTURE.md"><span class="nav-icon">⌗</span> Architecture</a>
+        <a class="nav-item" href="https://github.com/Khushalzz/flink-selective-ai-anomaly-detection"><span class="nav-icon">↗</span> Project README</a>
+        <a class="nav-item" href="https://github.com/Khushalzz/flink-selective-ai-anomaly-detection/blob/main/docs/ARCHITECTURE.md"><span class="nav-icon">⌗</span> Architecture</a>
       </nav>
 
       <div class="sidebar-foot">
         <div class="preview-icon">◉</div>
-        <div><strong>Preview mode</strong><small>Sample data · no live stream</small></div>
+        <div><strong id="sidebar-mode-title">Live monitor</strong><small id="sidebar-mode-caption">Waiting for stream</small></div>
       </div>
     </aside>
 
@@ -46,7 +46,11 @@
       <header class="topbar">
         <div class="breadcrumb"><span>Intel Lab</span><b>/</b><strong>Overview</strong></div>
         <div class="topbar-actions">
-          <span class="preview-pill"><i></i> LOCAL PREVIEW</span>
+          <div class="mode-switch" role="group" aria-label="Dashboard data mode">
+            <button type="button" data-mode="live" class="selected">Live</button>
+            <button type="button" data-mode="preview">Preview</button>
+          </div>
+          <span class="preview-pill" id="connection-pill"><i></i><span id="connection-label">CONNECTING</span></span>
           <button class="avatar" type="button" aria-label="Preview profile">K</button>
         </div>
       </header>
@@ -54,66 +58,67 @@
       <div class="page-wrap">
         <section class="page-heading">
           <div>
-            <p class="eyebrow">MONDAY, MARCH 01, 2004 <span>·</span> INTEL BERKELEY RESEARCH LAB</p>
+            <p class="eyebrow">INTEL BERKELEY RESEARCH LAB <span>·</span> CHRONOLOGICAL REPLAY</p>
             <h1>Telemetry overview</h1>
             <p class="subheading">A clear view of sensor health, anomaly activity, and model routing.</p>
           </div>
           <a class="outline-button" href="#event-queue"><span>↓</span> Review events</a>
         </section>
 
-        <section class="demo-banner" aria-label="Preview data notice">
+        <section class="demo-banner" id="mode-banner" aria-label="Data mode notice">
           <span class="banner-symbol">i</span>
-          <p><strong>Preview data</strong><span>This dashboard is a static UI demo. Values below are illustrative and are not connected to Kafka, Flink, or live sensors.</span></p>
-          <span class="banner-tag">SAMPLE SNAPSHOT</span>
+          <p><strong id="mode-title">Connecting to live run</strong><span id="mode-message">Loading Kafka, Flink, ClickHouse, and Redis status.</span></p>
+          <span class="banner-tag" id="banner-tag">CONNECTING</span>
         </section>
 
         <section class="metric-grid" aria-label="Key metrics">
           <article class="metric-card">
-            <div class="metric-top"><span class="metric-label">Sensor locations</span><span class="metric-icon mint">⌖</span></div>
-            <div class="metric-value">54 <span class="metric-unit">motes</span></div>
-            <div class="metric-foot"><span class="status-dot green"></span> Intel Lab deployment map</div>
+            <div class="metric-top"><span class="metric-label">Events processed</span><span class="metric-icon mint">⌖</span></div>
+            <div class="metric-value" id="metric-total">0</div>
+            <div class="metric-foot"><span class="status-dot green"></span> <span id="metric-source">Waiting for a run</span></div>
           </article>
           <article class="metric-card">
-            <div class="metric-top"><span class="metric-label">Escalation rate</span><span class="metric-icon violet">↗</span></div>
-            <div class="metric-value">20.5<span class="metric-unit">%</span></div>
-            <div class="metric-foot"><span class="tiny-tag">OFFLINE EVALUATION</span> uncertainty gate</div>
+            <div class="metric-top"><span class="metric-label">Measured throughput</span><span class="metric-icon violet">↗</span></div>
+            <div class="metric-value"><span id="metric-throughput">—</span><span class="metric-unit">ev/s</span></div>
+            <div class="metric-foot"><span class="tiny-tag" id="metric-escalation-tag">FLINK OUTPUT</span> <span id="metric-escalated-count">measured events</span></div>
           </article>
           <article class="metric-card">
             <div class="metric-top"><span class="metric-label">Fallback F1 score</span><span class="metric-icon blue">✳</span></div>
-            <div class="metric-value">0.824</div>
-            <div class="metric-foot"><span class="status-dot blue-dot"></span> XGBoost · synthetic test split</div>
+            <div class="metric-value" id="metric-f1">—</div>
+            <div class="metric-foot"><span class="status-dot blue-dot"></span> <span id="metric-model-caption">XGBoost · current run</span></div>
           </article>
           <article class="metric-card">
-            <div class="metric-top"><span class="metric-label">Test anomaly rate</span><span class="metric-icon coral">!</span></div>
-            <div class="metric-value">2.85<span class="metric-unit">%</span></div>
-            <div class="metric-foot"><span class="tiny-tag warm-tag">INJECTED</span> 1,138 of 40,000 windows</div>
+            <div class="metric-top"><span class="metric-label">Detected anomaly rate</span><span class="metric-icon coral">!</span></div>
+            <div class="metric-value"><span id="metric-anomaly-rate">—</span><span class="metric-unit">%</span></div>
+            <div class="metric-foot"><span class="tiny-tag warm-tag" id="metric-truth-tag">GROUND TRUTH</span> <span id="metric-truth-count">evaluation labels</span></div>
           </article>
         </section>
 
         <section class="overview-grid">
           <article class="panel chart-panel">
             <div class="panel-heading">
-              <div><p class="eyebrow">SAMPLE REPLAY</p><h2>Event volume</h2><p class="panel-subtitle">Illustrative incoming readings per interval</p></div>
+              <div><p class="eyebrow" id="chart-eyebrow">LIVE STREAM</p><h2>Event volume</h2><p class="panel-subtitle" id="chart-subtitle">Processed readings per interval</p></div>
               <div class="range-switch" role="group" aria-label="Chart range">
                 <button type="button" data-range="1h">1H</button>
                 <button type="button" data-range="6h">6H</button>
                 <button class="selected" type="button" data-range="24h">24H</button>
               </div>
             </div>
-            <div class="chart-legend"><span><i class="legend-blue"></i> Readings</span><span class="chart-note">DEMO SERIES</span></div>
+            <div class="chart-legend"><span><i class="legend-blue"></i> Readings</span><span class="chart-note" id="chart-series-label">LIVE RUN</span></div>
             <div class="chart-holder"><svg id="volume-chart" viewBox="0 0 760 250" role="img" aria-label="Illustrative event volume chart"></svg></div>
-            <div class="chart-xlabels"><span>00:00</span><span>04:00</span><span>08:00</span><span>12:00</span><span>16:00</span><span>20:00</span><span>24:00</span></div>
+            <div class="chart-xlabels" id="chart-xlabels"><span>00:00</span><span>04:00</span><span>08:00</span><span>12:00</span><span>16:00</span><span>20:00</span><span>24:00</span></div>
           </article>
 
           <article class="panel routing-panel" id="model-routing">
-            <div class="panel-heading compact-heading"><div><p class="eyebrow">OFFLINE BENCHMARK</p><h2>Decision routing</h2></div><span class="more-dot">···</span></div>
-            <p class="panel-subtitle">Reported evaluation split · not a live route</p>
-            <div class="donut-wrap"><div class="donut"><div class="donut-center"><strong>20.5%</strong><small>ESCALATED</small></div></div></div>
+            <div class="panel-heading compact-heading"><div><p class="eyebrow" id="routing-eyebrow">LIVE ROUTING</p><h2>Decision routing</h2></div><span class="more-dot">···</span></div>
+            <p class="panel-subtitle" id="routing-subtitle">Reported evaluation split · not a live route</p>
+            <label class="system-select-label">SYSTEM <select id="system-select"><option value="fast">Fast path</option><option value="bdt" selected>BDT · XGBoost</option><option value="laya">Laya comparison</option></select></label>
+            <div class="donut-wrap"><div class="donut" id="routing-donut"><div class="donut-center"><strong id="routing-rate">—</strong><small>ESCALATED</small></div></div></div>
             <div class="route-legend">
-              <div><span class="route-swatch fast"></span><span>Fast path</span><strong>79.5%</strong></div>
-              <div><span class="route-swatch fallback"></span><span>XGBoost fallback</span><strong>20.5%</strong></div>
+              <div><span class="route-swatch fast"></span><span id="route-fast-label">Fast path</span><strong id="route-fast-percent">—</strong></div>
+              <div><span class="route-swatch fallback"></span><span id="route-fallback-label">XGBoost fallback</span><strong id="route-fallback-percent">—</strong></div>
             </div>
-            <div class="routing-foot"><span>IF + Autoencoder</span><span class="arrow">→</span><strong>XGBoost</strong></div>
+            <div class="routing-foot"><span>IF + Autoencoder</span><span class="arrow">→</span><strong id="routing-engine">XGBoost</strong></div>
           </article>
         </section>
 
@@ -125,11 +130,9 @@
           <div class="map-layout">
             <div class="map-frame"><img src="../assets/intel-lab-sensor-map.png" alt="Floor plan showing numbered Intel Lab sensor locations" loading="lazy"></div>
             <aside class="map-aside">
-              <div class="map-aside-title"><strong>Sample attention list</strong><span>DEMO</span></div>
-              <div class="sensor-row"><span class="sensor-number">12</span><span><strong>Mote 12</strong><small>Temperature drift</small></span><span class="severity medium">REVIEW</span></div>
-              <div class="sensor-row"><span class="sensor-number">27</span><span><strong>Mote 27</strong><small>Voltage dip</small></span><span class="severity high">HIGH</span></div>
-              <div class="sensor-row"><span class="sensor-number">41</span><span><strong>Mote 41</strong><small>Flatline detected</small></span><span class="severity high">HIGH</span></div>
-              <div class="map-aside-foot">These rows are examples for the UI preview.</div>
+              <div class="map-aside-title"><strong id="map-list-title">Latest alerts</strong><span id="map-list-tag">DEMO</span></div>
+              <div id="map-attention-list"></div>
+              <div class="map-aside-foot" id="map-aside-foot">Showing sample events.</div>
             </aside>
           </div>
         </section>
@@ -137,13 +140,13 @@
         <section class="bottom-grid">
           <article class="panel events-panel" id="event-queue">
             <div class="panel-heading events-heading">
-              <div><p class="eyebrow">SYNTHETIC TEST DATA</p><h2>Recent anomaly events</h2></div>
+              <div><p class="eyebrow" id="events-eyebrow">LIVE RUN DATA</p><h2>Recent stream events</h2></div>
               <label class="search-box"><span>⌕</span><input id="event-search" type="search" placeholder="Search mote" aria-label="Search events by mote"></label>
             </div>
             <div class="filter-row" role="group" aria-label="Filter events">
-              <button class="filter-chip active" data-filter="all" type="button">All events <span>5</span></button>
-              <button class="filter-chip" data-filter="high" type="button">High priority <span>2</span></button>
-              <button class="filter-chip" data-filter="review" type="button">Needs review <span>3</span></button>
+              <button class="filter-chip active" data-filter="all" type="button">All events <span id="filter-all-count">0</span></button>
+              <button class="filter-chip" data-filter="high" type="button">High priority <span id="filter-high-count">0</span></button>
+              <button class="filter-chip" data-filter="review" type="button">Needs review <span id="filter-review-count">0</span></button>
             </div>
             <div class="table-scroll"><table class="events-table">
               <thead><tr><th>EVENT</th><th>SENSOR</th><th>TYPE</th><th>TIME</th><th>STATE</th></tr></thead>
@@ -153,15 +156,15 @@
 
           <article class="panel model-panel">
             <div class="panel-heading compact-heading"><div><p class="eyebrow">MODEL STACK</p><h2>Evaluation models</h2></div><span class="model-mark">BDT</span></div>
-            <div class="model-step"><span class="step-number">01</span><div><strong>Isolation Forest</strong><small>Python ONNX Runtime · offline</small></div><span class="step-state">READY*</span></div>
-            <div class="model-step"><span class="step-number">02</span><div><strong>Autoencoder</strong><small>Python ONNX Runtime · offline</small></div><span class="step-state">READY*</span></div>
+            <div class="model-step"><span class="step-number">01</span><div><strong>Isolation Forest</strong><small>ONNX Runtime · Flink JVM</small></div><span class="step-state">JVM</span></div>
+            <div class="model-step"><span class="step-number">02</span><div><strong>Autoencoder</strong><small>ONNX Runtime · Flink JVM</small></div><span class="step-state">JVM</span></div>
             <div class="model-connector"></div>
-            <div class="model-step fallback-step"><span class="step-number">03</span><div><strong>XGBoost fallback</strong><small>Selective escalation · offline</small></div><span class="step-state teal-state">READY*</span></div>
-            <div class="model-disclaimer">*Artifact files are present. The Java Flink job does not invoke these models.</div>
+            <div class="model-step fallback-step"><span class="step-number">03</span><div><strong>XGBoost fallback</strong><small>ONNX Runtime · Flink JVM</small></div><span class="step-state teal-state">JVM</span></div>
+            <div class="model-disclaimer">Laya is an optional async comparison route; XGBoost remains the default fallback.</div>
           </article>
         </section>
 
-        <footer class="page-footer"><span>BDT · Intel Lab research preview</span><span>Static sample UI · <a href="../README.md">Project notes</a></span></footer>
+        <footer class="page-footer"><span>BDT · Intel Lab research preview</span><span id="footer-mode">Connecting to live API</span><a href="https://github.com/Khushalzz/flink-selective-ai-anomaly-detection">Project notes</a></footer>
       </div>
     </main>
   </div>

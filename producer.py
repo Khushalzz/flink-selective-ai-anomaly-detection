@@ -1,158 +1,149 @@
+"""Replay Intel Lab readings to Kafka with stable per-run event identity."""
+
 import argparse
 import os
 import sys
 import time
+import uuid
+
 import orjson
-import pandas as pd
 from kafka import KafkaProducer
 
 
-def run_producer(
-    file_path: str,
-    bootstrap_servers: str,
-    topic: str,
-    delay: float = 0.0,
-    max_records: int | None = None,
-    batch_size: int = 2000,
-):
-    if not os.path.exists(file_path):
-        print(f"Error: File not found at '{file_path}'")
-        sys.exit(1)
+def iter_parquet_rows(file_path, batch_size):
+    import pyarrow.parquet as pq
 
-    print(f"Connecting to Kafka broker at {bootstrap_servers}...")
+    parquet_file = pq.ParquetFile(file_path)
+    expected = parquet_file.metadata.num_rows
+    for batch in parquet_file.iter_batches(batch_size=batch_size):
+        values = batch.to_pydict()
+        for index in range(len(values["moteid"])):
+            date = values["date"][index]
+            clock = values["time"][index]
+            row = {
+                "date": date,
+                "time": clock,
+                "timestamp": f"{date}T{clock}",
+                "epoch": int(values["epoch"][index]),
+                "moteid": int(values["moteid"][index]),
+                "temperature": float(values["temperature"][index]),
+                "humidity": float(values["humidity"][index]),
+                "light": float(values["light"][index]),
+                "voltage": float(values["voltage"][index]),
+            }
+            if "label" in values and values["label"][index] is not None:
+                row["label"] = int(values["label"][index])
+            if "anomaly_type" in values and values["anomaly_type"][index] is not None:
+                row["anomaly_type"] = str(values["anomaly_type"][index])
+            yield row
+    return expected
+
+
+def iter_text_rows(file_path):
+    with open(file_path, "r", encoding="utf-8") as source:
+        for line in source:
+            parts = line.strip().split()
+            if len(parts) < 8:
+                continue
+            date, clock = parts[0], parts[1]
+            yield {
+                "date": date,
+                "time": clock,
+                "timestamp": f"{date}T{clock}",
+                "epoch": int(parts[2]),
+                "moteid": int(parts[3]),
+                "temperature": float(parts[4]),
+                "humidity": float(parts[5]),
+                "light": float(parts[6]),
+                "voltage": float(parts[7]),
+            }
+
+
+def run_producer(file_path, bootstrap_servers, topic, delay=0.0, max_records=None,
+                 batch_size=2000, run_id=None, redis_host=None, redis_port=6379, laya_enabled=False):
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Telemetry file not found: {file_path}")
+    run_id = run_id or uuid.uuid4().hex
+    expected = None
+    if file_path.endswith(".parquet"):
+        import pyarrow.parquet as pq
+        expected = pq.ParquetFile(file_path).metadata.num_rows
+    if max_records is not None and expected is not None:
+        expected = min(expected, max_records)
+
+    run_store = None
+    if redis_host:
+        import redis
+        run_store = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+        run_store.ping()
+        run_store.set("bdt:active_run", run_id)
+        run_store.hset(f"bdt:run:{run_id}", mapping={
+            "status": "starting",
+            "expected_count": expected or "",
+            "started_at_epoch_ms": int(time.time() * 1000),
+            "sent_count": 0,
+            "laya_enabled": "1" if laya_enabled else "0",
+        })
+
     producer = KafkaProducer(
         bootstrap_servers=bootstrap_servers.split(","),
-        value_serializer=lambda v: orjson.dumps(v),
-        key_serializer=lambda k: str(k).encode("utf-8") if k is not None else None,
-        acks=1,
-        linger_ms=5,             # Micro-batching in Kafka client for ultra-high throughput
-        batch_size=65536,        # 64 KB buffer per partition
-        compression_type="lz4",  # High-speed low-CPU compression
+        value_serializer=orjson.dumps,
+        key_serializer=lambda key: str(key).encode("utf-8") if key is not None else None,
+        acks="all",
+        linger_ms=5,
+        batch_size=65536,
+        compression_type="lz4",
     )
-    print(f"Connected! High-speed streaming to topic: '{topic}'")
-    print(f"Source: {file_path}")
-    print(f"Delay: {delay}s | Max records: {max_records or 'Unlimited'}")
-    print("-" * 60)
-
-    start_time = time.time()
-    sent_count = 0
-
+    print(f"Run {run_id}: streaming {file_path} to {topic} at {bootstrap_servers}")
+    sent = 0
+    started = time.perf_counter()
+    rows = iter_parquet_rows(file_path, batch_size) if file_path.endswith(".parquet") else iter_text_rows(file_path)
     try:
-        if file_path.endswith(".parquet"):
-            # Stream from pre-sorted chronological Parquet file
-            import pyarrow.parquet as pq
-            parquet_file = pq.ParquetFile(file_path)
-            stop_early = False
-
-            for batch in parquet_file.iter_batches(batch_size=batch_size):
-                pydict = batch.to_pydict()
-                n = len(pydict["date"])
-                for i in range(n):
-                    mote = int(pydict["moteid"][i])
-                    d_str = pydict["date"][i]
-                    t_str = pydict["time"][i]
-                    record = {
-                        "date": d_str,
-                        "time": t_str,
-                        "timestamp": f"{d_str}T{t_str}",
-                        "epoch": int(pydict["epoch"][i]),
-                        "moteid": mote,
-                        "temperature": float(pydict["temperature"][i]),
-                        "humidity": float(pydict["humidity"][i]),
-                        "light": float(pydict["light"][i]),
-                        "voltage": float(pydict["voltage"][i]),
-                    }
-
-                    producer.send(topic, key=mote, value=record)
-                    sent_count += 1
-
-                    if delay > 0:
-                        time.sleep(delay)
-
-                    if max_records and sent_count >= max_records:
-                        stop_early = True
-                        break
-
-                elapsed = time.time() - start_time
-                rate = sent_count / elapsed if elapsed > 0 else 0
-                print(f"[Streaming] Sent {sent_count:,} events | Speed: {rate:,.0f} msgs/sec")
-
-                if stop_early:
-                    break
-        else:
-            # Fallback to plain text reading
-            with open(file_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    parts = line.strip().split()
-                    if len(parts) < 8:
-                        continue
-                    mote = int(parts[3])
-                    d_str = parts[0]
-                    t_str = parts[1]
-                    record = {
-                        "date": d_str,
-                        "time": t_str,
-                        "timestamp": f"{d_str}T{t_str}",
-                        "epoch": int(parts[2]),
-                        "moteid": mote,
-                        "temperature": float(parts[4]),
-                        "humidity": float(parts[5]),
-                        "light": float(parts[6]),
-                        "voltage": float(parts[7]),
-                    }
-                    producer.send(topic, key=mote, value=record)
-                    sent_count += 1
-
-                    if delay > 0:
-                        time.sleep(delay)
-                    if max_records and sent_count >= max_records:
-                        break
-                    if sent_count % 5000 == 0:
-                        elapsed = time.time() - start_time
-                        rate = sent_count / elapsed if elapsed > 0 else 0
-                        print(f"[Streaming] Sent {sent_count:,} events | Speed: {rate:,.0f} msgs/sec")
-
+        for row in rows:
+            sent += 1
+            row["run_id"] = run_id
+            row["event_id"] = f"{run_id}:{sent}"
+            row["sent_at_epoch_ms"] = int(time.time() * 1000)
+            producer.send(topic, key=row["moteid"], value=row)
+            if delay > 0:
+                time.sleep(delay)
+            if sent % 1000 == 0:
+                elapsed = time.perf_counter() - started
+                print(f"sent={sent:,} rate={sent / elapsed:,.0f} events/s")
+            if max_records is not None and sent >= max_records:
+                break
     except KeyboardInterrupt:
-        print("\nStreaming interrupted by user.")
+        print("Replay interrupted; flushing records already sent.")
     finally:
-        print("\nFlushing remaining messages to Kafka...")
         producer.flush()
         producer.close()
-        total_time = time.time() - start_time
-        final_rate = sent_count / total_time if total_time > 0 else 0
-        print(f"Finished. Total sent: {sent_count:,} in {total_time:.2f}s ({final_rate:,.0f} msgs/sec)")
+        elapsed = time.perf_counter() - started
+        if run_store:
+            run_store.hset(f"bdt:run:{run_id}", mapping={
+                "status": "producer_finished",
+                "sent_count": sent,
+                "producer_finished_at_epoch_ms": int(time.time() * 1000),
+            })
+            run_store.close()
+        print(f"run_id={run_id} sent={sent:,} elapsed={elapsed:.2f}s rate={sent / elapsed if elapsed else 0:,.0f} events/s")
+    return run_id
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="High-Speed Intel Lab Kafka Producer")
-    parser.add_argument(
-        "--file",
-        default="data_chronological.parquet" if os.path.exists("data_chronological.parquet") else os.path.join("archive (5)", "data.txt"),
-        help="Path to dataset file (.parquet or data.txt)",
-    )
-    parser.add_argument(
-        "--broker",
-        default="localhost:29092",
-        help="Kafka bootstrap server",
-    )
-    parser.add_argument(
-        "--topic",
-        default="intel-lab-sensors",
-        help="Kafka topic name",
-    )
-    parser.add_argument(
-        "--delay",
-        type=float,
-        default=0.0,
-        help="Delay in seconds between messages (default: 0 for max speed)",
-    )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=None,
-        help="Limit number of messages to send (optional)",
-    )
-
+def main():
+    default_file = "data/processed/test_features.parquet"
+    if not os.path.exists(default_file):
+        default_file = "data_chronological.parquet" if os.path.exists("data_chronological.parquet") else os.path.join("archive (5)", "data.txt")
+    parser = argparse.ArgumentParser(description="Replay Intel Lab readings to Kafka.")
+    parser.add_argument("--file", default=default_file)
+    parser.add_argument("--broker", default="localhost:29092")
+    parser.add_argument("--topic", default="intel-lab-sensors")
+    parser.add_argument("--delay", type=float, default=0.0, help="Seconds between records; 0 runs at maximum producer rate")
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=2000)
+    parser.add_argument("--run-id", default=None)
+    parser.add_argument("--redis-host", default=None)
+    parser.add_argument("--redis-port", type=int, default=6379)
+    parser.add_argument("--laya-enabled", action="store_true")
     args = parser.parse_args()
     run_producer(
         file_path=args.file,
@@ -160,4 +151,13 @@ if __name__ == "__main__":
         topic=args.topic,
         delay=args.delay,
         max_records=args.limit,
+        batch_size=args.batch_size,
+        run_id=args.run_id,
+        redis_host=args.redis_host,
+        redis_port=args.redis_port,
+        laya_enabled=args.laya_enabled,
     )
+
+
+if __name__ == "__main__":
+    main()

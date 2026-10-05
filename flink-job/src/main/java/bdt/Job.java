@@ -5,23 +5,35 @@ import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.CheckpointingMode;
+import org.apache.flink.streaming.api.datastream.AsyncDataStream;
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.util.OutputTag;
 
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 public class Job {
+    private static final OutputTag<LayaRequest> LAYA_REQUESTS = new OutputTag<LayaRequest>("laya-requests") {};
+
     public static void main(String[] args) throws Exception {
         Map<String, String> config = parseArgs(args);
-
         String kafkaBootstrap = config.getOrDefault("kafka", "kafka:9092");
         String topic = config.getOrDefault("topic", "intel-lab-sensors");
-        String groupId = config.getOrDefault("group", "bdt-anomaly-group-v2");
+        String groupId = config.getOrDefault("group", "bdt-run-group");
         String redisHost = config.getOrDefault("redisHost", "redis");
         int redisPort = Integer.parseInt(config.getOrDefault("redisPort", "6379"));
         String clickhouseUrl = config.getOrDefault("clickhouseUrl", "http://clickhouse:8123");
+        String modelDirectory = config.getOrDefault("modelDir", "/workspace/models");
+        String layaUrl = config.getOrDefault("layaUrl", "http://laya-sidecar:8000/decide/laya");
+        boolean layaEnabled = Boolean.parseBoolean(config.getOrDefault("layaEnabled", "false"));
+        String mode = config.getOrDefault("mode", "bdt").toLowerCase();
+        if (!mode.equals("bdt") && !mode.equals("fast")) {
+            throw new IllegalArgumentException("mode must be fast or bdt");
+        }
         int parallelism = Integer.parseInt(config.getOrDefault("parallelism", "4"));
         long checkpointIntervalMs = Long.parseLong(config.getOrDefault("checkpointIntervalMs", "10000"));
         if (checkpointIntervalMs <= 0) {
@@ -43,45 +55,48 @@ public class Job {
                 .setProperty("commit.offsets.on.checkpoint", "true")
                 .build();
 
-        DataStream<SensorReading> inputStream = env.fromSource(
-                kafkaSource,
-                WatermarkStrategy.noWatermarks(),
-                "KafkaSensorSource"
-        ).setParallelism(parallelism);
+        DataStream<SensorReading> input = env.fromSource(
+                kafkaSource, WatermarkStrategy.noWatermarks(), "KafkaSensorSource")
+                .setParallelism(parallelism);
 
-        // Key by sensor mote ID: load is uniformly partitioned across all 4 worker slots
-        DataStream<AnomalyRecord> processedStream = inputStream
+        SingleOutputStreamOperator<AnomalyRecord> bdtResults = input
                 .keyBy(SensorReading::getMoteid)
-                .process(new AnomalyDetectorFunction())
-                .name("AnomalyDetector")
+                .process(new AnomalyDetectorFunction(modelDirectory, mode.equals("bdt"), layaEnabled, LAYA_REQUESTS))
+                .name("JVMModelScoring")
                 .setParallelism(parallelism);
 
-        // Sink 1: ClickHouse (acknowledged micro-batches; backpressure on insert failure)
-        processedStream.addSink(new ClickHouseSink(clickhouseUrl))
-                .name("ClickHouseSink")
+        bdtResults.addSink(new ClickHouseSink(clickhouseUrl))
+                .name("ClickHouseBdtSink")
+                .setParallelism(parallelism);
+        bdtResults.addSink(new RedisAlertSink(redisHost, redisPort))
+                .name("RedisBdtAlertSink")
+                .setParallelism(parallelism);
+        bdtResults.filter(record -> Integer.valueOf(1).equals(record.getIsAnomaly()))
+                .print("BDT_ALERT")
                 .setParallelism(parallelism);
 
-        // Sink 2: Redis (Instant alert queue for detected anomalies)
-        processedStream.addSink(new RedisAlertSink(redisHost, redisPort))
-                .name("RedisAlertSink")
-                .setParallelism(parallelism);
+        if (layaEnabled) {
+            DataStream<LayaRequest> uncertain = bdtResults.getSideOutput(LAYA_REQUESTS);
+            DataStream<AnomalyRecord> layaResults = AsyncDataStream.unorderedWait(
+                    uncertain,
+                    new LayaAsyncFunction(layaUrl),
+                    15,
+                    TimeUnit.SECONDS,
+                    1
+            );
+            layaResults.addSink(new ClickHouseSink(clickhouseUrl))
+                    .name("ClickHouseLayaComparisonSink")
+                    .setParallelism(parallelism);
+        }
 
-        // Sink 3: High-efficiency sampled stdout (only logs true anomalies to avoid Docker console drag)
-        processedStream
-                .filter(record -> record.getIsAnomaly() == 1)
-                .print("ALERT")
-                .setParallelism(parallelism);
-
-        env.execute("Optimized Parallel Anomaly Pipeline");
+        env.execute("BDT " + mode.toUpperCase() + " Pipeline");
     }
 
     private static Map<String, String> parseArgs(String[] args) {
         Map<String, String> map = new HashMap<>();
         for (String arg : args) {
             int idx = arg.indexOf('=');
-            if (idx > 0) {
-                map.put(arg.substring(0, idx).trim(), arg.substring(idx + 1).trim());
-            }
+            if (idx > 0) map.put(arg.substring(0, idx).trim(), arg.substring(idx + 1).trim());
         }
         return map;
     }

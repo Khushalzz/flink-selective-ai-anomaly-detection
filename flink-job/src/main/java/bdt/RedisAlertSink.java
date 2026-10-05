@@ -32,7 +32,7 @@ public class RedisAlertSink extends RichSinkFunction<AnomalyRecord> {
 
     @Override
     public void invoke(AnomalyRecord record, Context context) throws Exception {
-        if (record.getIsAnomaly() != 1) {
+        if (!Integer.valueOf(1).equals(record.getIsAnomaly())) {
             return;
         }
 
@@ -41,8 +41,9 @@ public class RedisAlertSink extends RichSinkFunction<AnomalyRecord> {
                 connect();
             }
             String alertJson = objectMapper.writeValueAsString(record);
-            jedis.rpush("alerts:anomalies", alertJson);
-            jedis.ltrim("alerts:anomalies", -2000, -1);
+            String key = "alerts:anomalies:" + record.getRunId();
+            jedis.rpush(key, alertJson);
+            jedis.ltrim(key, -2000, -1);
             jedis.publish("channel:anomalies", alertJson);
         } catch (Exception e) {
             if (jedis != null) {

@@ -40,8 +40,6 @@ services:
     ports:
       - "8123:8123"
       - "9000:9000"
-    volumes:
-      - ./docker/clickhouse/init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
     environment:
       CLICKHOUSE_DB: default
       CLICKHOUSE_USER: default
@@ -51,6 +49,7 @@ services:
     image: mongo:7.0
     container_name: bdt-mongodb
     hostname: mongodb
+    profiles: ["legacy"]
     restart: unless-stopped
     ports:
       - "27017:27017"
@@ -64,6 +63,9 @@ services:
     container_name: bdt-flink-jobmanager
     hostname: jobmanager
     command: jobmanager
+    depends_on:
+      checkpoint-init:
+        condition: service_completed_successfully
     ports:
       - "8081:8081"
     environment:
@@ -96,6 +98,76 @@ services:
       - .:/workspace
       - flink_checkpoints:/opt/flink/checkpoints
 
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: bdt-dashboard
+    restart: unless-stopped
+    ports:
+      - "4173:4173"
+    environment:
+      CLICKHOUSE_URL: http://clickhouse:8123
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      FLINK_REST_URL: http://jobmanager:8081
+      SCHEMA_PATH: /app/init.sql
+      ASSET_DIR: /app/assets
+    volumes:
+      - ./assets:/app/assets:ro
+      - ./docker/clickhouse/init.sql:/app/init.sql:ro
+    depends_on:
+      - redis
+      - clickhouse
+      - jobmanager
+
+  flink-builder:
+    image: maven:3.9.9-eclipse-temurin-17
+    profiles: ["tools"]
+    working_dir: /workspace/flink-job
+    volumes:
+      - .:/workspace
+      - maven_cache:/root/.m2
+    command: ["mvn", "package"]
+
+  checkpoint-init:
+    image: flink:1.20.2-scala_2.12-java17
+    user: "0:0"
+    entrypoint: ["sh", "-c"]
+    command: ["chown -R 9999:9999 /opt/flink/checkpoints"]
+    volumes:
+      - flink_checkpoints:/opt/flink/checkpoints
+
+  producer:
+    build:
+      context: ./docker/demo
+      dockerfile: Dockerfile
+    profiles: ["demo"]
+    working_dir: /workspace
+    volumes:
+      - .:/workspace:ro
+    depends_on:
+      - kafka
+      - redis
+
+  laya-sidecar:
+    build:
+      context: ./sidecar
+      dockerfile: Dockerfile
+    profiles: ["laya"]
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      ENABLE_LAYA_MODEL: "1"
+      OMP_NUM_THREADS: "4"
+      OPENBLAS_NUM_THREADS: "4"
+      MKL_NUM_THREADS: "4"
+      USE_TF: "0"
+    volumes:
+      - ./models:/app/models:ro
+
 volumes:
   mongo_data:
   flink_checkpoints:
+  maven_cache:

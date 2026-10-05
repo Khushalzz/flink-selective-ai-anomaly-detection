@@ -1,25 +1,56 @@
-# Current System Architecture
+# Runtime Architecture
 
-This document describes what the checked-in code runs today. The repository has an offline model-evaluation path and a separate Java Flink example; they are not wired together as a deployed BDT pipeline.
+This document describes the current runnable local pipeline. Python remains useful for model training and offline comparisons; the main streaming inference path runs inside Flink on the JVM.
 
-## Flink runtime
+## End-to-end data flow
 
-`flink-job/src/main/java/bdt/Job.java` reads JSON records from Kafka, keys them by mote ID, and runs `AnomalyDetectorFunction`. That function applies fixed physical bounds and Z-score checks against a per-key Welford accumulator. The accumulator is lifetime state; it is not a 15-minute rolling window. The current job does not invoke the ONNX models or the FastAPI sidecar.
+```text
+Labeled Intel Lab replay
+        │
+        ▼
+Kafka topic (one unique topic per run)
+        │
+        ▼
+Flink Kafka source → keyed per-mote feature windows
+        │
+        ├── Isolation Forest ONNX ─┐
+        ├── Autoencoder ONNX ──────┴─ fast decision
+        │                              │ uncertain/disagreement
+        │                              ▼
+        │                      XGBoost ONNX fallback
+        │                              │
+        └──────────────────────────────┴──► ClickHouse + Redis
+                                              │
+                                              ▼
+                                      Dashboard API + UI
 
-The job enables Flink checkpoints in at-least-once mode. Kafka offsets and keyed state can be restored from a checkpoint. Compose stores checkpoint files in the named local `flink_checkpoints` volume. ClickHouse and Redis are not transactional Flink sinks, so recovery may replay records and create duplicates. Downstream consumers should use `(moteid, epoch)` as an event identity where deduplication is needed.
+Uncertain events ── optional Flink Async I/O ──► Laya CPU sidecar ──► ClickHouse
+```
 
-ClickHouse inserts are batched and acknowledged synchronously. A non-success HTTP response fails the sink task so Flink can restart from a checkpoint. The ClickHouse table schema is initialized for new ClickHouse data directories from `docker/clickhouse/init.sql`. Redis write failures are surfaced to Flink rather than silently discarded.
+The default `bdt` job does not make network calls for model inference: Isolation Forest, Autoencoder, and XGBoost run in the Flink JVM through ONNX Runtime. The `fast` mode is the comparison baseline with no XGBoost escalation.
 
-## Offline Python evaluation
+## Feature and decision contract
 
-`experiments/evaluate_systems.py` loads precomputed feature rows and evaluates Python ONNX Runtime, XGBoost, and Laya models. `demo_streaming_pipeline.py` replays those rows locally, but does not recompute streaming features or communicate with Kafka/Flink/sidecar.
+Each Kafka record carries the raw Intel Lab readings, an event identity, a run identity, the injection label, and a send timestamp. Flink keys state by mote and maintains the same short and long rolling windows used by the offline feature pipeline (6 readings and 30 readings). The 10 model inputs are:
 
-`experiments/streaming_benchmark_sweep.py` computes offline detection scores at selected escalation rates. Its capacity column is an analytical model-service estimate based on batched Python timings and an assumed transport cap; it excludes Flink, Kafka, HTTP, and sink work. It does not include Laya or measured latency percentiles. The estimate is not end-to-end streaming performance.
+`temperature, humidity, light, voltage, delta_temp_3m, delta_volt_3m, z_temp_15m, z_volt_15m, temp_slope_15m, var_temp_15m`.
 
-## FastAPI sidecar
+The model bundle loads the IF/AE ONNX files and calibration settings once per operator. The gate escalates uncertain scores in the open interval 0.35–0.65 and detector disagreement. Escalated BDT records also include the two detector probabilities for the XGBoost model. Parity tests compare these results with the checked-in Python reference fixture.
 
-`sidecar/app.py` exposes XGBoost, heuristic, Laya, and batch endpoints. The health response reports model readiness. Batch calls are limited to 256 records, and the engine name is validated. The Flink job currently does not call these endpoints.
+## Sinks and recovery
 
-## Local services
+Each run uses a unique Kafka topic and `run_id`, so the dashboard reads only the latest selected run. The job checkpoints every 10 seconds with at-least-once semantics. ClickHouse inserts are acknowledged synchronously in batches and flushed periodically; Redis write failures are surfaced to Flink. Neither sink participates in a cross-system transaction, so a restored job can replay records. The ClickHouse `ReplacingMergeTree` uses `(run_id, event_id, engine)` as its replacement key.
 
-`docker-compose.yml` starts a single Kafka broker, Flink JobManager and TaskManager, Redis, ClickHouse, and MongoDB. Compose starts the infrastructure only; it does not build or submit the Flink job or start the Python sidecar. The MongoDB service is not currently used by the runtime code.
+The Compose ClickHouse service uses its existing anonymous data volume. Dashboard startup creates `default.anomaly_events` if it is absent and does not drop or reinitialize existing tables such as `sensor_readings`.
+
+## Dashboard
+
+`dashboard/api.py` serves the static dashboard and a read-only API. It reads model events and aggregate metrics from ClickHouse, run metadata from Redis, and Flink health from the Flink REST endpoint. The UI has a live view and a separate labeled offline preview. Live figures are based on actual rows from the selected run; the preview figures are illustrative offline results.
+
+## Laya comparison branch
+
+The repository contains an optional CPU-only Laya sidecar and Flink comparison route, but this path is experimental. The integrated sensor replay encountered Laya timeouts and backpressure, so the branch is excluded from the verified live demo and throughput benchmark. Laya is also not trained for this sensor dataset. Revisit its queueing, timeout, and sensor accuracy evaluation before relying on it.
+
+## Measurements and limits
+
+`scripts/run_benchmark.py` replays the same held-out split through `fast` and `bdt`, then writes measured ClickHouse-backed throughput, processing latency, F1, precision, and recall to `experiments/results/streaming_integration_benchmark.csv`. These are local Docker measurements, not a cluster capacity guarantee. Report the hardware, Docker limits, replay size, and both model quality and throughput when presenting them. The separate `experiments/streaming_benchmark_sweep.py` remains an offline analytical estimate and must not be described as measured Flink capacity.

@@ -16,6 +16,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class ClickHouseSink extends RichSinkFunction<AnomalyRecord> {
     private static final long serialVersionUID = 1L;
@@ -26,7 +29,8 @@ public class ClickHouseSink extends RichSinkFunction<AnomalyRecord> {
     private transient HttpClient httpClient;
     private transient ObjectMapper objectMapper;
     private transient List<String> buffer;
-    private transient long lastFlushTime;
+    private transient ScheduledExecutorService flushScheduler;
+    private transient volatile String backgroundFlushFailure;
 
     public ClickHouseSink(String clickhouseUrl, int batchSize) {
         this.clickhouseUrl = clickhouseUrl;
@@ -34,79 +38,105 @@ public class ClickHouseSink extends RichSinkFunction<AnomalyRecord> {
     }
 
     public ClickHouseSink(String clickhouseUrl) {
-        this(clickhouseUrl, 2500);
+        this(clickhouseUrl, 1000);
     }
 
     @Override
     public void open(OpenContext openContext) {
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(5))
-                .build();
-        this.objectMapper = new ObjectMapper();
-        this.buffer = new ArrayList<>(batchSize);
-        this.lastFlushTime = System.currentTimeMillis();
+        httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+        objectMapper = new ObjectMapper();
+        buffer = new ArrayList<>(batchSize);
+        flushScheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "clickhouse-periodic-flush");
+            thread.setDaemon(true);
+            return thread;
+        });
+        flushScheduler.scheduleAtFixedRate(() -> {
+            try {
+                flushBuffer();
+            } catch (Exception error) {
+                backgroundFlushFailure = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
+            }
+        }, FLUSH_INTERVAL_MS, FLUSH_INTERVAL_MS, TimeUnit.MILLISECONDS);
     }
 
     @Override
     public void invoke(AnomalyRecord record, Context context) throws Exception {
-        Map<String, Object> map = new HashMap<>();
-        String ts = record.getTimestamp();
-        if (ts != null) {
-            ts = ts.replace("T", " ");
-            if (ts.length() > 23) {
-                ts = ts.substring(0, 23);
+        synchronized (this) {
+            if (backgroundFlushFailure != null) {
+                throw new IOException("Previous ClickHouse insert failed: " + backgroundFlushFailure);
             }
-        } else {
-            ts = record.getDate() + " " + record.getTime();
-        }
-        map.put("timestamp", ts);
-        map.put("date", record.getDate());
-        map.put("epoch", record.getEpoch());
-        map.put("moteid", record.getMoteid());
-        map.put("temperature", (float) record.getTemperature());
-        map.put("humidity", (float) record.getHumidity());
-        map.put("light", (float) record.getLight());
-        map.put("voltage", (float) record.getVoltage());
-        map.put("is_anomaly", record.getIsAnomaly());
-        map.put("anomaly_score", (float) record.getAnomalyScore());
-        map.put("anomaly_reasons", record.getAnomalyReasons() != null ? record.getAnomalyReasons() : "");
-
-        buffer.add(objectMapper.writeValueAsString(map));
-        long now = System.currentTimeMillis();
-        if (buffer.size() >= batchSize || now - lastFlushTime >= FLUSH_INTERVAL_MS) {
-            flushBuffer();
+            buffer.add(objectMapper.writeValueAsString(toRow(record)));
+            if (buffer.size() >= batchSize) flushBuffer();
         }
     }
 
-    private void flushBuffer() throws IOException, InterruptedException {
-        if (buffer == null || buffer.isEmpty()) {
-            return;
+    private Map<String, Object> toRow(AnomalyRecord record) {
+        Map<String, Object> row = new HashMap<>();
+        String timestamp = record.getTimestamp();
+        if (timestamp != null) {
+            timestamp = timestamp.replace("T", " ");
+            if (timestamp.length() > 23) timestamp = timestamp.substring(0, 23);
+        } else {
+            timestamp = record.getDate() + " " + record.getTime();
         }
+        row.put("run_id", record.getRunId());
+        row.put("event_id", record.getEventId());
+        row.put("timestamp", timestamp);
+        row.put("date", record.getDate());
+        row.put("epoch", record.getEpoch());
+        row.put("moteid", record.getMoteid());
+        row.put("temperature", record.getTemperature());
+        row.put("humidity", record.getHumidity());
+        row.put("light", record.getLight());
+        row.put("voltage", record.getVoltage());
+        row.put("ground_truth", record.getGroundTruthLabel());
+        row.put("is_anomaly", record.getIsAnomaly());
+        row.put("prediction", record.getPrediction());
+        row.put("p_if", record.getPIf());
+        row.put("p_ae", record.getPAe());
+        row.put("p_final", record.getPFinal());
+        row.put("uncertain", record.isUncertain() ? 1 : 0);
+        row.put("escalated", record.isEscalated() ? 1 : 0);
+        row.put("system_name", record.getSystem());
+        row.put("engine", record.getEngine());
+        row.put("inference_status", record.getInferenceStatus());
+        row.put("anomaly_score", record.getAnomalyScore());
+        row.put("anomaly_reasons", record.getAnomalyReasons() == null ? "" : record.getAnomalyReasons());
+        row.put("anomaly_type", record.getAnomalyType() == null ? "" : record.getAnomalyType());
+        row.put("sent_at_epoch_ms", record.getSentAtEpochMs());
+        row.put("processed_at_epoch_ms", record.getProcessedAtEpochMs());
+        row.put("processing_latency_ms", record.getProcessingLatencyMs());
+        return row;
+    }
 
+    private synchronized void flushBuffer() throws IOException, InterruptedException {
+        if (buffer == null || buffer.isEmpty()) return;
         String body = String.join("\n", buffer) + "\n";
-        String query = URLEncoder.encode(
-                "INSERT INTO sensor_readings FORMAT JSONEachRow",
-                StandardCharsets.UTF_8
-        );
+        String query = URLEncoder.encode("INSERT INTO anomaly_events FORMAT JSONEachRow", StandardCharsets.UTF_8);
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(clickhouseUrl + "/?query=" + query))
                 .timeout(Duration.ofSeconds(10))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
-
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new IOException("ClickHouse insert failed (HTTP " + response.statusCode() + "): " + response.body());
         }
-
-        // Clear only after a successful server response so failures reach Flink's restart policy.
         buffer.clear();
-        lastFlushTime = System.currentTimeMillis();
+        backgroundFlushFailure = null;
     }
 
     @Override
     public void close() throws Exception {
+        if (flushScheduler != null) {
+            flushScheduler.shutdown();
+            if (!flushScheduler.awaitTermination(15, TimeUnit.SECONDS)) flushScheduler.shutdownNow();
+        }
         flushBuffer();
+        if (backgroundFlushFailure != null) {
+            throw new IOException("ClickHouse periodic flush failed: " + backgroundFlushFailure);
+        }
     }
 }

@@ -4,7 +4,7 @@
   <p>
     <a href="https://flink.apache.org/"><img src="https://img.shields.io/badge/Apache%20Flink-1.20.2-E6526F?logo=apacheflink&logoColor=white" alt="Apache Flink 1.20.2"></a>
     <a href="https://kafka.apache.org/"><img src="https://img.shields.io/badge/Apache%20Kafka-3.9.2-231F20?logo=apachekafka&logoColor=white" alt="Apache Kafka 3.9.2"></a>
-    <a href="https://onnxruntime.ai/"><img src="https://img.shields.io/badge/ONNX%20Runtime-Python%20evaluation-005CED?logo=onnx&logoColor=white" alt="Python ONNX Runtime"></a>
+    <a href="https://onnxruntime.ai/"><img src="https://img.shields.io/badge/ONNX%20Runtime-Python%20%2B%20Flink%20JVM-005CED?logo=onnx&logoColor=white" alt="ONNX Runtime in Python and the Flink JVM"></a>
     <a href="https://xgboost.readthedocs.io/"><img src="https://img.shields.io/badge/XGBoost-fallback-2088FF?logo=xgboost&logoColor=white" alt="XGBoost"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="Apache 2.0 license"></a>
     <a href=".github/workflows/ci.yml"><img src="https://github.com/Khushalzz/flink-selective-ai-anomaly-detection/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
@@ -16,32 +16,53 @@
 </p>
 <p align="center"><em>Numbered sensor locations across the Intel Lab floor plan.</em></p>
 
-> **Research prototype:** The Java Flink job and the Python model experiments are separate today. The Flink job uses physical thresholds and per-sensor lifetime statistics; it does not load ONNX models or call the Python sidecar. Offline benchmark results below are not Flink throughput measurements.
+> **Research prototype:** The main BDT path runs in Flink with JVM ONNX Runtime scoring and a local live dashboard. The Laya sidecar is experimental and excluded from the verified run and benchmark. Offline model scores and Flink replay results are reported separately.
 
 ## What this project explores
 
 Can a fast first-stage detector preserve streaming capacity while escalating only uncertain sensor readings to a more expressive decision model?
 
-This repository studies that question with Intel Lab telemetry, controlled anomaly injection, Python ONNX Runtime, XGBoost, and a separate Java/Flink runtime example.
+This repository studies that question with Intel Lab telemetry, controlled anomaly injection, Apache Kafka, Apache Flink, ONNX Runtime, XGBoost, Redis, and ClickHouse.
 
 ## Two paths in the repository
 
 | Path | Current behavior |
 | --- | --- |
-| **Flink runtime** | Kafka → keyed physical thresholds and lifetime Welford statistics → ClickHouse, Redis alerts, and stdout. |
-| **Offline model study** | Prepared Parquet → Python ONNX Runtime (Isolation Forest + Autoencoder) → uncertainty gate → XGBoost or Laya evaluation. |
+| **Fast baseline** | Kafka → keyed online sensor features → Isolation Forest + Autoencoder in Flink/JVM → ClickHouse and Redis. |
+| **BDT path** | Uncertain/disagreeing readings escalate to an XGBoost ONNX model in the same Flink/JVM job. |
+| **Laya comparison** | Experimental CPU-only Python sidecar branch; its sensor-data accuracy and effect on stream throughput are not verified. |
+| **Dashboard** | FastAPI reads live run metrics and event rows from ClickHouse, service health from Redis/Flink, and displays them in a responsive local UI. |
 
-The paths are not yet connected end to end. See [the architecture notes](docs/ARCHITECTURE.md) for the exact implementation boundary.
+The feature window and model inputs match the Python evaluation contract. See [the architecture notes](docs/ARCHITECTURE.md) for data flow, semantics, and current limitations.
 
-## Frontend preview
+## Run the live demo
 
-A standalone responsive dashboard preview is available in `dashboard/`. It uses sample data and the Intel Lab floor-plan image; it does not connect to Kafka or Flink.
+Docker Desktop and Python 3.10+ are required. From the repository root:
 
 ```bash
-python -m http.server 4173 --bind 127.0.0.1
+python scripts/run_demo.py --mode bdt --limit 5000
 ```
 
-Open [http://localhost:4173/dashboard/](http://localhost:4173/dashboard/).
+This builds the Flink job and producer, starts Kafka, Flink, Redis, ClickHouse, and the dashboard, submits the job, and replays labeled held-out sensor rows through Kafka. Open [http://localhost:4173/dashboard/](http://localhost:4173/dashboard/) for live metrics. Use `--mode fast` to run the baseline. The dashboard also includes a clearly labeled offline preview mode.
+
+The Laya comparison remains experimental and is not included in the verified demo or throughput results. Use the fast and BDT modes for the reproducible comparison below.
+
+To measure both Flink paths over the full held-out split and save the results to `experiments/results/streaming_integration_benchmark.csv`:
+
+```bash
+python scripts/run_benchmark.py
+```
+
+The output reports measured replay throughput and latency alongside F1, precision, and recall from the injected labels. These are local Docker results and can vary with hardware, Docker limits, and startup state.
+
+Latest local run, replaying the same 40,000 events in each mode with an unpaced producer:
+
+| Mode | F1 | False-positive rate | Escalated | Throughput | End-to-end p95 latency |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Fast (IF + AE) | 0.4125 | 7.20% | 0% | 1,283 events/s | 29.86 s |
+| BDT (IF + AE → XGBoost) | **0.8238** | **1.00%** | 20.51% | 1,332 events/s | 28.99 s |
+
+This is one local run, not a claim that BDT is faster. The p95 includes queueing under the burst replay and is not model-only inference time. The raw measurements are in [`streaming_integration_benchmark.csv`](experiments/results/streaming_integration_benchmark.csv).
 
 ## Offline results
 
@@ -67,7 +88,7 @@ The sweep chart combines held-out offline F1 scores with a **model-only capacity
   <img src="assets/f1_vs_estimated_capacity.png" width="100%" alt="Offline F1 compared with estimated model-service capacity">
 </p>
 
-## Run the offline demo
+## Run the standalone offline replay
 
 The repository includes processed Parquet splits and model artifacts for a quick local replay:
 
@@ -78,27 +99,11 @@ pip install -r requirements.txt
 python demo_streaming_pipeline.py --samples 2000
 ```
 
-This replays prepared feature rows with Python ONNX Runtime and local XGBoost inference. It does not launch Flink, recompute online features, or call the FastAPI sidecar.
+This is a quick Python-only replay of prepared features. Use `scripts/run_demo.py` above for the Kafka → Flink pipeline and live dashboard.
 
-## Start the local infrastructure
+## Local service pages
 
-```bash
-docker compose up -d
-docker compose ps
-```
-
-The Flink dashboard is at [http://localhost:8081](http://localhost:8081). Compose starts the services, but does not build or submit the Flink job.
-
-To build and submit the current Java job:
-
-```bash
-cd flink-job
-mvn package -DskipTests
-cd ..
-docker exec -it bdt-flink-jobmanager flink run   -c bdt.Job   /opt/flink/usrlib/bdt-flink-job-1.0.0-shaded.jar   kafka=kafka:9092   topic=intel-lab-sensors   clickhouseUrl=http://clickhouse:8123   redisHost=redis   parallelism=4
-```
-
-The job is threshold-based. Checkpoints use at-least-once semantics; ClickHouse and Redis may see duplicates after recovery.
+The demo script starts all required containers. Open the [live dashboard](http://localhost:4173/dashboard/) and [Flink job manager](http://localhost:8081). The dashboard API health endpoint is [http://localhost:4173/api/health](http://localhost:4173/api/health).
 
 ## Reproduce the offline study
 
